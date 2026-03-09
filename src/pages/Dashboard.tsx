@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { completeQuest, type CompleteQuestResponse } from '../lib/api';
-import type { Quest, Streak, LevelThreshold } from '../lib/database.types';
-import { Shield, Swords, Search, Crown, Flame, Coins, Check, Sparkles, LogOut } from 'lucide-react';
+import type { Quest, Streak, LevelThreshold, Reward } from '../lib/database.types';
+import { Shield, Swords, Search, Crown, Flame, Coins, Check, Sparkles, LogOut, Gift, Lock } from 'lucide-react';
 
 // Stat bar component
 function StatBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
@@ -49,8 +49,8 @@ function QuestCard({ quest, isCompleted, onComplete }: {
                 onClick={handleComplete}
                 disabled={isCompleted || loading}
                 className={`w-6 h-6 rounded mt-0.5 border-2 flex items-center justify-center transition-all shrink-0 ${isCompleted
-                        ? 'bg-emerald-500 border-emerald-500'
-                        : 'bg-slate-900 border-slate-600 hover:border-amber-500'
+                    ? 'bg-emerald-500 border-emerald-500'
+                    : 'bg-slate-900 border-slate-600 hover:border-amber-500'
                     }`}
             >
                 {loading ? (
@@ -92,6 +92,7 @@ export default function Dashboard() {
     const [nextLevelXP, setNextLevelXP] = useState(100);
     const [levelUpToast, setLevelUpToast] = useState('');
     const [achievementToast, setAchievementToast] = useState('');
+    const [rewards, setRewards] = useState<Reward[]>([]);
 
     // Fetch data on mount
     const fetchData = useCallback(async () => {
@@ -138,6 +139,15 @@ export default function Dashboard() {
             .single();
 
         if (nextThreshold) setNextLevelXP((nextThreshold as LevelThreshold).xp_required);
+
+        // Fetch rewards
+        const { data: rewardData } = await supabase
+            .from('rewards')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('unlock_level');
+
+        if (rewardData) setRewards(rewardData as Reward[]);
     }, [user, profile?.level]);
 
     useEffect(() => {
@@ -186,8 +196,7 @@ export default function Dashboard() {
     // XP progress calculation
     const currentXP = profile?.xp ?? 0;
     const currentLevel = profile?.level ?? 1;
-    const { data: prevThresholdData } = { data: null } as { data: LevelThreshold | null }; // We'll use a simpler calc
-    const prevLevelXP = currentLevel === 1 ? 0 : Math.round(nextLevelXP * 0.6); // approx
+    const prevLevelXP = currentLevel === 1 ? 0 : Math.round(nextLevelXP * 0.6);
     const xpInLevel = currentXP - prevLevelXP;
     const xpNeeded = nextLevelXP - prevLevelXP;
     const xpPercent = Math.min((xpInLevel / Math.max(xpNeeded, 1)) * 100, 100);
@@ -314,6 +323,44 @@ export default function Dashboard() {
                         <StatBar label="Social" value={profile?.stat_social ?? 0} color="bg-pink-500" />
                     </div>
                 </div>
+
+                {/* Rewards (Milestone) */}
+                {rewards.length > 0 && (
+                    <div>
+                        <h2 className="font-heading text-lg text-amber-400 mb-3 flex items-center gap-2">
+                            <Gift className="w-5 h-5" /> Milestone Rewards
+                        </h2>
+                        <div className="space-y-2">
+                            {rewards.map(r => {
+                                const unlocked = currentLevel >= r.unlock_level;
+                                return (
+                                    <div key={r.id} className={`bg-slate-800 border rounded-lg p-4 flex items-center gap-3 transition-all duration-300 ${r.is_redeemed ? 'border-emerald-800/40 opacity-50' : unlocked ? 'border-amber-500/40 shadow-glow-gold' : 'border-slate-700/50 opacity-70'
+                                        }`}>
+                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${r.is_redeemed ? 'bg-emerald-900/50' : unlocked ? 'bg-amber-500/20' : 'bg-slate-700'
+                                            }`}>
+                                            {r.is_redeemed ? (
+                                                <Check className="w-5 h-5 text-emerald-400" />
+                                            ) : unlocked ? (
+                                                <Gift className="w-5 h-5 text-amber-500" />
+                                            ) : (
+                                                <Lock className="w-5 h-5 text-slate-500" />
+                                            )}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className={`text-sm font-medium ${r.is_redeemed ? 'line-through text-slate-500' : unlocked ? 'text-white' : 'text-slate-400'
+                                                }`}>{r.title}</p>
+                                            {r.description && (
+                                                <p className="text-xs text-slate-500 mt-0.5 truncate">{r.description}</p>
+                                            )}
+                                        </div>
+                                        <span className={`text-xs font-heading ${unlocked ? 'text-amber-500' : 'text-slate-600'
+                                            }`}>Lv.{r.unlock_level}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 {/* Empty state */}
                 {quests.length === 0 && (

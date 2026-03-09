@@ -22,7 +22,7 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Streak Tracking:** Detect daily consistency and apply XP multipliers.
 - [x] **Achievement System:** Define and trigger unlockable badges (e.g., First Quest, 7-Day Streak).
 - [x] **Dashboard UI:** Combine Character card, XP bar, daily quests, and streak into the main view.
-- [ ] **Custom Rewards:** Allow users to define real-life rewards at specific level milestones.
+- [x] **Custom Rewards:** AI-generated real-life rewards at level milestones.
 
 ## Phase 4: Polish & Launch (Version 1.0)
 - [ ] **Quest Screen:** Dedicated view for Daily, Side, and Boss quests.
@@ -37,6 +37,6 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [ ] Guild system (friends / accountability groups)
 - [ ] PvP challenges (step competitions, productivity battles)
 - [ ] Leaderboards
-- [ ] AI quest generation (AI suggests daily quests)
+- [ ] AI quest generation (AI suggests daily quests) ← ✅ Already implemented via Edge Functions
 - [ ] Loot system (random reward drops)
 - [ ] Character cosmetics

@@ -83,3 +83,22 @@ export async function completeQuest(questId: string): Promise<CompleteQuestRespo
 
     return response.data as CompleteQuestResponse;
 }
+
+/**
+ * Call the generate-rewards Edge Function.
+ * LLM decides personalized real-life rewards based on user's profile.
+ */
+export async function generateRewards(): Promise<{ success: boolean; rewards: Array<Record<string, unknown>> }> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const response = await supabase.functions.invoke('generate-rewards', {
+        body: {},
+    });
+
+    if (response.error) {
+        throw new Error(response.error.message || 'Failed to generate rewards');
+    }
+
+    return response.data as { success: boolean; rewards: Array<Record<string, unknown>> };
+}

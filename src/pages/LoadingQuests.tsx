@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Compass } from 'lucide-react';
-import { generateQuests } from '../lib/api';
+import { generateQuests, generateRewards } from '../lib/api';
 
 const GENERATION_STEPS = [
     "Analyzing your daily rhythm...",
     "Creating daily quests...",
     "Preparing weekly challenges...",
+    "Crafting your rewards...",
     "Building your character profile..."
 ];
 
@@ -39,10 +40,11 @@ export default function LoadingQuests() {
             const currentProgress = Math.min((currentTick / totalTicks) * 100, maxProgress);
             setProgress(currentProgress);
 
-            if (currentProgress < 25) setStepIndex(0);
-            else if (currentProgress < 50) setStepIndex(1);
-            else if (currentProgress < 80) setStepIndex(2);
-            else setStepIndex(3);
+            if (currentProgress < 20) setStepIndex(0);
+            else if (currentProgress < 40) setStepIndex(1);
+            else if (currentProgress < 60) setStepIndex(2);
+            else if (currentProgress < 80) setStepIndex(3);
+            else setStepIndex(4);
 
             if (aiDone && currentProgress >= 100) {
                 clearInterval(timer);
@@ -52,17 +54,22 @@ export default function LoadingQuests() {
             }
         }, intervalTime);
 
-        // Actually call the AI Edge Function
         const callAI = async () => {
             try {
                 if (lifeRhythm) {
                     await generateQuests(lifeRhythm);
                 }
+                // Generate personalized rewards after quests
+                try {
+                    await generateRewards();
+                } catch (rewardErr) {
+                    console.warn('Reward generation failed (non-blocking):', rewardErr);
+                }
                 aiSuccess = true;
             } catch (err) {
                 console.error('Quest generation failed:', err);
                 setError('Quest generation failed. You can retry from Settings.');
-                aiSuccess = true; // Still navigate to dashboard
+                aiSuccess = true;
             } finally {
                 aiDone = true;
             }
