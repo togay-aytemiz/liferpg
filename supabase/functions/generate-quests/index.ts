@@ -104,11 +104,22 @@ serve(async (req) => {
             );
         }
 
+        // Fetch preferences from profile
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("likes, dislikes, focus_areas")
+            .eq("id", user.id)
+            .single();
+
+        const likesText = profile?.likes ? `\nWhat I LIKE/ENJOY: ${profile.likes}` : "";
+        const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
+        const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
+
         // Call OpenAI to generate quests
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}` },
+                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}\n\nPlease generate quests highly tailored to this routine, my focus areas, and my likes. Strictly AVOID what I hate!` },
             ],
             {
                 model: "gpt-4o-mini",

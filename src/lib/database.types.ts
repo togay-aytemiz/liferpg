@@ -17,6 +17,9 @@ export interface Profile {
     username: string | null;
     avatar_url: string | null;
     life_rhythm: string | null;
+    likes: string | null;
+    dislikes: string | null;
+    focus_areas: string | null;
     level: number;
     xp: number;
     gold: number;

@@ -8,6 +8,9 @@ export default function Onboarding() {
     const navigate = useNavigate();
     const { user, refreshProfile } = useAuth();
     const [lifeRhythm, setLifeRhythm] = useState('');
+    const [likes, setLikes] = useState('');
+    const [dislikes, setDislikes] = useState('');
+    const [focusAreas, setFocusAreas] = useState('');
     const [saving, setSaving] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -16,11 +19,16 @@ export default function Onboarding() {
 
         setSaving(true);
 
-        // Save life_rhythm to user profile in Supabase
+        // Save life_rhythm and preferences to user profile in Supabase
         const { error } = await supabase
             .from('profiles')
-            // @ts-ignore - Supabase types fallback to 'never' incorrectly here
-            .update({ life_rhythm: lifeRhythm.trim() })
+            // @ts-ignore
+            .update({
+                life_rhythm: lifeRhythm.trim(),
+                likes: likes.trim() || null,
+                dislikes: dislikes.trim() || null,
+                focus_areas: focusAreas.trim() || null
+            })
             .eq('id', user.id);
 
         if (error) {
@@ -55,33 +63,67 @@ export default function Onboarding() {
 
             {/* Form Area */}
             <form onSubmit={handleSubmit} className="flex-1 flex flex-col">
-                <div className="flex-1 flex flex-col gap-2">
-                    <label htmlFor="rhythm" className="text-sm font-semibold text-slate-300 ml-1">
-                        Describe your life or a typical day.
-                    </label>
-                    <textarea
-                        id="rhythm"
-                        value={lifeRhythm}
-                        onChange={(e) => setLifeRhythm(e.target.value)}
-                        placeholder={`"I usually wake up around 7:30. I work from 9 to 18. I go to the gym in the evenings. I want to read more and improve my skills..."`}
-                        className="w-full flex-1 min-h-[200px] max-h-[300px] p-4 bg-slate-800/80 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner-panel resize-none"
-                        autoFocus
-                    />
+                <div className="flex-1 flex flex-col gap-6 overflow-y-auto pb-4 pr-2 custom-scrollbar">
+                    {/* Life Rhythm (Required) */}
+                    <div className="flex flex-col gap-2">
+                        <label htmlFor="rhythm" className="text-sm font-semibold text-slate-300 ml-1">
+                            Describe your typical day / routine <span className="text-red-400">*</span>
+                        </label>
+                        <textarea
+                            id="rhythm"
+                            value={lifeRhythm}
+                            onChange={(e) => setLifeRhythm(e.target.value)}
+                            placeholder={`"I wake up at 7:30, work 9-5, hit the gym in the evening..."`}
+                            className="w-full min-h-[120px] p-4 bg-slate-800/80 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 resize-none"
+                            autoFocus
+                        />
+                    </div>
 
-                    <div className="bg-slate-800/50 rounded-lg p-4 mt-2 border border-slate-700/50">
-                        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Include things like:</h4>
-                        <ul className="text-xs text-slate-400 space-y-1.5 list-disc list-inside">
-                            <li>When you wake up</li>
-                            <li>Work or school schedule</li>
-                            <li>When you exercise</li>
-                            <li>When you relax</li>
-                            <li>Your general lifestyle goals</li>
-                        </ul>
+                    {/* Likes & Hobbies (Optional) */}
+                    <div className="flex flex-col gap-2">
+                        <label htmlFor="likes" className="text-sm font-semibold text-slate-300 ml-1">
+                            What do you enjoy doing? (Optional)
+                        </label>
+                        <textarea
+                            id="likes"
+                            value={likes}
+                            onChange={(e) => setLikes(e.target.value)}
+                            placeholder={`"Gaming, reading fantasy books, cooking Italian food..."`}
+                            className="w-full min-h-[80px] p-3 text-sm bg-slate-800/60 border border-slate-700/60 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 resize-none"
+                        />
+                    </div>
+
+                    {/* Dislikes (Optional) */}
+                    <div className="flex flex-col gap-2">
+                        <label htmlFor="dislikes" className="text-sm font-semibold text-slate-300 ml-1">
+                            What do you hate doing? (Optional)
+                        </label>
+                        <textarea
+                            id="dislikes"
+                            value={dislikes}
+                            onChange={(e) => setDislikes(e.target.value)}
+                            placeholder={`"I hate running, crowded places, doing the dishes..."`}
+                            className="w-full min-h-[80px] p-3 text-sm bg-slate-800/60 border border-slate-700/60 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50 resize-none"
+                        />
+                    </div>
+
+                    {/* Focus Areas (Optional) */}
+                    <div className="flex flex-col gap-2">
+                        <label htmlFor="focusAreas" className="text-sm font-semibold text-slate-300 ml-1">
+                            What do you want to improve? (Optional)
+                        </label>
+                        <textarea
+                            id="focusAreas"
+                            value={focusAreas}
+                            onChange={(e) => setFocusAreas(e.target.value)}
+                            placeholder={`"I want to focus on my career, learn a new language, save money..."`}
+                            className="w-full min-h-[80px] p-3 text-sm bg-slate-800/60 border border-slate-700/60 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 resize-none"
+                        />
                     </div>
                 </div>
 
                 {/* Footer Actions */}
-                <div className="mt-8">
+                <div className="mt-4 pt-4 border-t border-slate-800">
                     <button
                         type="submit"
                         disabled={lifeRhythm.trim().length < 10 || saving}

@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - **Settings Screen:** Username editing, Life Rhythm editing with quest + reward regeneration via Edge Functions
 - **Character & Achievements Screen:** Full character card, stat bars, and achievement grid with rarity-colored cards (common → legendary)
 - **Quest Skip, Reason & Regen:** Users can skip quests up to 3 times a day by picking a reason (e.g. "Too difficult"). This reason + the user's routine is immediately sent to the LLM to generate a smart replacement quest on the spot.
+- **Deep Personalization Context:** Added optional `Likes`, `Dislikes`, and `Focus Areas` to onboarding and settings. AI uses this to tailor quests precisely to hobbies while actively avoiding disliked activities.
 - **AI Robustness:** OpenAI retry with exponential backoff (3 attempts), response validation with field whitelisting, duplicate completion guard
 
 ### Changed

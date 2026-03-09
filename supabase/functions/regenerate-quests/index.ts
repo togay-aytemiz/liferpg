@@ -128,13 +128,24 @@ serve(async (req) => {
             }).join(" | ")}`
             : "";
 
+        // 3c. Fetch preferences from profile
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("likes, dislikes, focus_areas")
+            .eq("id", user.id)
+            .single();
+
+        const likesText = profile?.likes ? `\nWhat I LIKE/ENJOY: ${profile.likes}` : "";
+        const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
+        const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
+
         // 4. Call OpenAI
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
                 {
                     role: "user",
-                    content: `Here is my updated daily routine:\n\n${life_rhythm}${historyContext}${skipContext}`,
+                    content: `Here is my updated daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${historyContext}${skipContext}\n\nPlease generate quests highly tailored to my routine, my focus areas, and my likes. Strictly AVOID what I hate!`,
                 },
             ],
             {

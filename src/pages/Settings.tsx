@@ -10,6 +10,9 @@ export default function Settings() {
     const { user, profile, refreshProfile, signOut } = useAuth();
     const [lifeRhythm, setLifeRhythm] = useState('');
     const [username, setUsername] = useState('');
+    const [likes, setLikes] = useState('');
+    const [dislikes, setDislikes] = useState('');
+    const [focusAreas, setFocusAreas] = useState('');
     const [saving, setSaving] = useState(false);
     const [regenerating, setRegenerating] = useState(false);
     const [savedMsg, setSavedMsg] = useState('');
@@ -18,6 +21,9 @@ export default function Settings() {
         if (profile) {
             setLifeRhythm(profile.life_rhythm || '');
             setUsername(profile.username || '');
+            setLikes(profile.likes || '');
+            setDislikes(profile.dislikes || '');
+            setFocusAreas(profile.focus_areas || '');
         }
     }, [profile]);
 
@@ -48,7 +54,12 @@ export default function Settings() {
             await supabase
                 .from('profiles')
                 // @ts-ignore
-                .update({ life_rhythm: lifeRhythm.trim() })
+                .update({
+                    life_rhythm: lifeRhythm.trim(),
+                    likes: likes.trim() || null,
+                    dislikes: dislikes.trim() || null,
+                    focus_areas: focusAreas.trim() || null
+                })
                 .eq('id', user.id);
 
             // Regenerate quests via Edge Function
@@ -126,12 +137,47 @@ export default function Settings() {
                     <p className="text-xs text-slate-500">
                         Update your daily routine. Saving will regenerate your quests and rewards based on the new description.
                     </p>
-                    <textarea
-                        value={lifeRhythm}
-                        onChange={(e) => setLifeRhythm(e.target.value)}
-                        placeholder="Describe your typical day..."
-                        className="w-full min-h-[160px] p-4 bg-slate-800/80 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner-panel resize-none text-sm"
-                    />
+                    <div className="space-y-3">
+                        <div>
+                            <label className="text-sm text-slate-400 ml-1 block mb-1">Your Daily Routine <span className="text-red-400">*</span></label>
+                            <textarea
+                                value={lifeRhythm}
+                                onChange={(e) => setLifeRhythm(e.target.value)}
+                                placeholder="Describe your typical day..."
+                                className="w-full min-h-[120px] p-3 bg-slate-800/80 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner-panel resize-none text-sm"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-sm text-slate-400 ml-1 block mb-1">What do you enjoy doing? (Likes)</label>
+                            <textarea
+                                value={likes}
+                                onChange={(e) => setLikes(e.target.value)}
+                                placeholder="Gaming, reading, cooking..."
+                                className="w-full min-h-[60px] p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 resize-none text-sm"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-sm text-slate-400 ml-1 block mb-1">What do you hate doing? (Dislikes)</label>
+                            <textarea
+                                value={dislikes}
+                                onChange={(e) => setDislikes(e.target.value)}
+                                placeholder="Running, crowds, washing dishes..."
+                                className="w-full min-h-[60px] p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50 resize-none text-sm"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-sm text-slate-400 ml-1 block mb-1">What do you want to improve? (Focus Areas)</label>
+                            <textarea
+                                value={focusAreas}
+                                onChange={(e) => setFocusAreas(e.target.value)}
+                                placeholder="Career, saving money, learning Spanish..."
+                                className="w-full min-h-[60px] p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 resize-none text-sm"
+                            />
+                        </div>
+                    </div>
                     <button
                         onClick={handleRegenerateQuests}
                         disabled={regenerating || lifeRhythm.trim().length < 10}

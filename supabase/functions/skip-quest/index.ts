@@ -119,10 +119,10 @@ serve(async (req) => {
         // Pass full user context + skip reasons so LLM learns immediately.
         // =================================================================
 
-        // 5a. Fetch user profile (rhythm + stats)
+        // 5a. Fetch user profile (rhythm, preferences, stats)
         const { data: profile } = await supabase
             .from("profiles")
-            .select("life_rhythm, level, stat_strength, stat_knowledge, stat_wealth, stat_adventure, stat_social")
+            .select("life_rhythm, likes, dislikes, focus_areas, level, stat_strength, stat_knowledge, stat_wealth, stat_adventure, stat_social")
             .eq("id", user.id)
             .single();
 
@@ -153,12 +153,16 @@ serve(async (req) => {
             }).join(" | ")}`
             : "";
 
+        const likesText = profile?.likes ? `\nWhat I LIKE/ENJOY: ${profile.likes}` : "";
+        const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
+        const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
+
         const replacementPrompt = `You are a game master for LifeRPG. The user just skipped a ${quest.quest_type} quest titled "${quest.title}" because: "${reason}".
         
 Your job is to generate EXACTLY ONE replacement ${quest.quest_type} quest that fits their routine but AVOIDS what they disliked.
 
 User's Daily Routine:
-${profile?.life_rhythm || "General healthy lifestyle"}
+${profile?.life_rhythm || "General healthy lifestyle"}${likesText}${dislikesText}${focusText}
 
 Stats - Strength: ${profile?.stat_strength}, Knowledge: ${profile?.stat_knowledge}, Wealth: ${profile?.stat_wealth}, Adventure: ${profile?.stat_adventure}, Social: ${profile?.stat_social}
 ${historyContext}${skipContext}
