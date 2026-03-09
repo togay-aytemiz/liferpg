@@ -143,3 +143,22 @@ export async function skipQuest(questId: string, reason: string): Promise<{ succ
 
     return response.data as { success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string; hp_lost: number; died: boolean; gold_lost: number; current_hp: number };
 }
+
+/**
+ * Call the create-custom-quest Edge Function.
+ * Sends a custom prompt to the AI to evaluate and create a personalized user quest (or avoidance goal).
+ */
+export async function createCustomQuest(prompt: string, questType: 'daily' | 'side'): Promise<{ success: boolean; message: string; quest: Quest }> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const response = await supabase.functions.invoke('create-custom-quest', {
+        body: { prompt, quest_type: questType },
+    });
+
+    if (response.error) {
+        throw new Error(response.error.message || 'Failed to create custom quest');
+    }
+
+    return response.data as { success: boolean; message: string; quest: Quest };
+}

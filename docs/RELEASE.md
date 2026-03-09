@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - **Quest Skip, Reason & Regen:** Users can skip quests up to 3 times a day by picking a reason (e.g. "Too difficult"). This reason + the user's routine is immediately sent to the LLM to generate a smart replacement quest on the spot.
 - **Deep Personalization Context:** Added optional `Likes`, `Dislikes`, and `Focus Areas` to onboarding and settings. AI uses this to tailor quests precisely to hobbies while actively avoiding disliked activities.
 - **Health Points (HP), Daily Penalties & Death:** Added a fully-integrated HP system (max 100). Characters lose HP by skipping quests (-5) or missing daily quests overnight (-10 via `daily-cron` Edge Function). If HP hits 0, they "die" (losing their ongoing streak and cutting their gold in half). Completing quests slowly heals the character (+2 HP).
+- **Custom Quests & Avoidance Goals:** Users can now click the `+` icon to add manual, custom quests. They simply write what they want to do (e.g. "Do laundry") or what they want to AVOID (e.g. "No fast food today"). The LLM evaluates the prompt, flags avoidance challenges as Willpower/Strength obstacles, and dynamically assigns difficulty, XP, Gold, and stat rewards.
 - **AI Robustness:** OpenAI retry with exponential backoff (3 attempts), response validation with field whitelisting, duplicate completion guard
 
 ### Changed

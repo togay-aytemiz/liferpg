@@ -56,6 +56,7 @@ export interface Quest {
     schedule_days: number[] | null;
     is_active: boolean;
     is_ai_generated: boolean;
+    is_custom: boolean;
     created_at: string;
     updated_at: string;
 }

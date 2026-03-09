@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { completeQuest, type CompleteQuestResponse } from '../lib/api';
 import type { Quest, Streak, LevelThreshold, Reward } from '../lib/database.types';
-import { Shield, Swords, Crown, Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Settings, Heart } from 'lucide-react';
+import { Shield, Swords, Crown, Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Settings, Heart, Plus } from 'lucide-react';
 
 // Stat bar component
 function StatBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
@@ -283,7 +283,15 @@ export default function Dashboard() {
                 {/* Daily Quests */}
                 {dailyQuests.length > 0 && (
                     <div>
-                        <h2 className="font-heading text-lg text-slate-300 mb-3">Daily Quests</h2>
+                        <div className="flex items-center justify-between mb-3">
+                            <h2 className="font-heading text-lg text-slate-300">Daily Quests</h2>
+                            <button
+                                onClick={() => navigate('/quests')}
+                                className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                            >
+                                <Plus className="w-4 h-4" />
+                            </button>
+                        </div>
                         <div className="space-y-2.5">
                             {dailyQuests.map(q => (
                                 <QuestCard
