@@ -13,10 +13,10 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Authentication & Routing:** Setup basic auth state and React Router.
 - [x] **Life Rhythm Onboarding:** Single-field text input for user routing capture.
 - [x] **Quest Generation (Loading Screen):** Animated RPG progress bar and status steps.
-- [ ] **Character Profile System:** Avatar, Username, core attributes setup.
-- [ ] **XP & Leveling System:** Implement XP calculation and Level boundaries (Level 1=0, Level 2=100, etc.).
-- [ ] **Stat Progression System:** Logic to map specific actions to stats (Strength, Knowledge, Wealth, Adventure, Social).
-- [ ] **Daily Quest System:** Add, edit, and complete repeatable daily quests (Generated from Life Rhythm).
+- [x] **Character Profile System:** Avatar, Username, core attributes setup.
+- [x] **XP & Leveling System:** Implement XP calculation and Level boundaries (Level 1=0, Level 2=100, etc.).
+- [x] **Stat Progression System:** Logic to map specific actions to stats (Strength, Knowledge, Wealth, Adventure, Social).
+- [x] **Daily Quest System:** Add, edit, and complete repeatable daily quests (Generated from Life Rhythm).
 
 ## Phase 3: Engagement & UI (MVP - Part 2)
 - [ ] **Streak Tracking:** Detect daily consistency and apply XP multipliers.

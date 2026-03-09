@@ -51,3 +51,35 @@ export async function regenerateQuests(lifeRhythm: string): Promise<GenerateQues
 
     return response.data as GenerateQuestsResponse;
 }
+
+export interface CompleteQuestResponse {
+    success: boolean;
+    xp_awarded: number;
+    gold_awarded: number;
+    new_xp: number;
+    new_level: number;
+    did_level_up: boolean;
+    streak: number;
+    xp_multiplier: number;
+    new_achievements: string[];
+    stat_updated: string | null;
+}
+
+/**
+ * Call the complete-quest Edge Function.
+ * Handles XP award, level up, stat increase, streak, and achievements.
+ */
+export async function completeQuest(questId: string): Promise<CompleteQuestResponse> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const response = await supabase.functions.invoke('complete-quest', {
+        body: { quest_id: questId },
+    });
+
+    if (response.error) {
+        throw new Error(response.error.message || 'Failed to complete quest');
+    }
+
+    return response.data as CompleteQuestResponse;
+}

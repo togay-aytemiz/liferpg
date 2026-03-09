@@ -1,39 +1,332 @@
-import { Shield, Swords, Search, Crown } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import { completeQuest, type CompleteQuestResponse } from '../lib/api';
+import type { Quest, Streak, LevelThreshold } from '../lib/database.types';
+import { Shield, Swords, Search, Crown, Flame, Coins, Check, Sparkles, LogOut } from 'lucide-react';
+
+// Stat bar component
+function StatBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
+    const pct = Math.min((value / max) * 100, 100);
+    return (
+        <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-400 w-20 truncate">{label}</span>
+            <div className="flex-1 h-2.5 bg-slate-800 rounded-full overflow-hidden shadow-inner-panel">
+                <div className={`h-full rounded-full transition-all duration-500 ${color}`} style={{ width: `${pct}%` }} />
+            </div>
+            <span className="text-xs text-slate-500 font-mono w-8 text-right">{value}</span>
+        </div>
+    );
+}
+
+// Quest card component
+function QuestCard({ quest, isCompleted, onComplete }: {
+    quest: Quest;
+    isCompleted: boolean;
+    onComplete: (id: string) => void;
+}) {
+    const [loading, setLoading] = useState(false);
+
+    const handleComplete = async () => {
+        if (isCompleted || loading) return;
+        setLoading(true);
+        await onComplete(quest.id);
+        setLoading(false);
+    };
+
+    const difficultyColors: Record<string, string> = {
+        easy: 'text-emerald-400',
+        medium: 'text-amber-400',
+        hard: 'text-red-400',
+        epic: 'text-purple-400',
+    };
+
+    return (
+        <div className={`bg-slate-800 border rounded-lg p-4 flex items-start gap-3 shadow-hud transition-all duration-300 ${isCompleted ? 'border-emerald-800/50 opacity-60' : quest.quest_type === 'boss' ? 'border-red-900/60' : 'border-slate-700'
+            }`}>
+            <button
+                onClick={handleComplete}
+                disabled={isCompleted || loading}
+                className={`w-6 h-6 rounded mt-0.5 border-2 flex items-center justify-center transition-all shrink-0 ${isCompleted
+                        ? 'bg-emerald-500 border-emerald-500'
+                        : 'bg-slate-900 border-slate-600 hover:border-amber-500'
+                    }`}
+            >
+                {loading ? (
+                    <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                ) : isCompleted ? (
+                    <Check className="w-4 h-4 text-white" />
+                ) : null}
+            </button>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                    <p className={`font-medium text-sm ${isCompleted ? 'line-through text-slate-500' : 'text-white'}`}>
+                        {quest.title}
+                    </p>
+                    {quest.quest_type === 'boss' && <span className="text-xs">⚔️</span>}
+                </div>
+                {quest.description && (
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">{quest.description}</p>
+                )}
+                <div className="flex items-center gap-3 mt-1.5">
+                    <span className="text-amber-500 text-xs font-mono">+{quest.xp_reward} XP</span>
+                    <span className={`text-xs ${difficultyColors[quest.difficulty] || 'text-slate-400'}`}>
+                        {quest.difficulty}
+                    </span>
+                    {quest.stat_affected && (
+                        <span className="text-xs text-slate-500">{quest.stat_affected}</span>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
 
 export default function Dashboard() {
+    const navigate = useNavigate();
+    const { user, profile, refreshProfile, signOut } = useAuth();
+    const [quests, setQuests] = useState<Quest[]>([]);
+    const [completedQuestIds, setCompletedQuestIds] = useState<Set<string>>(new Set());
+    const [streak, setStreak] = useState<Streak | null>(null);
+    const [nextLevelXP, setNextLevelXP] = useState(100);
+    const [levelUpToast, setLevelUpToast] = useState('');
+    const [achievementToast, setAchievementToast] = useState('');
+
+    // Fetch data on mount
+    const fetchData = useCallback(async () => {
+        if (!user) return;
+
+        // Fetch active quests
+        const { data: questData } = await supabase
+            .from('quests')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .order('quest_type');
+
+        if (questData) setQuests(questData as Quest[]);
+
+        // Fetch today's completions
+        const today = new Date().toISOString().split('T')[0];
+        const { data: completions } = await supabase
+            .from('user_quests')
+            .select('quest_id')
+            .eq('user_id', user.id)
+            .eq('quest_date', today)
+            .eq('is_completed', true);
+
+        if (completions) {
+            setCompletedQuestIds(new Set(completions.map((c: { quest_id: string }) => c.quest_id)));
+        }
+
+        // Fetch streak
+        const { data: streakData } = await supabase
+            .from('streaks')
+            .select('*')
+            .eq('user_id', user.id)
+            .single();
+
+        if (streakData) setStreak(streakData as Streak);
+
+        // Fetch next level XP target
+        const currentLevel = profile?.level ?? 1;
+        const { data: nextThreshold } = await supabase
+            .from('level_thresholds')
+            .select('xp_required')
+            .eq('level', currentLevel + 1)
+            .single();
+
+        if (nextThreshold) setNextLevelXP((nextThreshold as LevelThreshold).xp_required);
+    }, [user, profile?.level]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    const handleCompleteQuest = async (questId: string) => {
+        try {
+            const result: CompleteQuestResponse = await completeQuest(questId);
+
+            // Update local state
+            setCompletedQuestIds(prev => new Set([...prev, questId]));
+
+            // Refresh profile for updated XP/level/stats
+            await refreshProfile();
+
+            // Show toasts
+            if (result.did_level_up) {
+                setLevelUpToast(`Level Up! You are now Level ${result.new_level}!`);
+                setTimeout(() => setLevelUpToast(''), 4000);
+            }
+            if (result.new_achievements.length > 0) {
+                setAchievementToast(`🏆 ${result.new_achievements.join(', ')}`);
+                setTimeout(() => setAchievementToast(''), 4000);
+            }
+
+            // Refresh streak
+            if (result.streak !== streak?.current_streak) {
+                setStreak(prev => prev ? { ...prev, current_streak: result.streak, xp_multiplier: result.xp_multiplier } : prev);
+            }
+        } catch (err) {
+            console.error('Quest completion failed:', err);
+        }
+    };
+
+    const handleSignOut = async () => {
+        await signOut();
+        navigate('/auth');
+    };
+
+    // Separate quests by type
+    const dailyQuests = quests.filter(q => q.quest_type === 'daily');
+    const sideQuests = quests.filter(q => q.quest_type === 'side');
+    const bossQuest = quests.find(q => q.quest_type === 'boss');
+
+    // XP progress calculation
+    const currentXP = profile?.xp ?? 0;
+    const currentLevel = profile?.level ?? 1;
+    const { data: prevThresholdData } = { data: null } as { data: LevelThreshold | null }; // We'll use a simpler calc
+    const prevLevelXP = currentLevel === 1 ? 0 : Math.round(nextLevelXP * 0.6); // approx
+    const xpInLevel = currentXP - prevLevelXP;
+    const xpNeeded = nextLevelXP - prevLevelXP;
+    const xpPercent = Math.min((xpInLevel / Math.max(xpNeeded, 1)) * 100, 100);
+
     return (
-        <div className="flex-1 flex flex-col animate-in fade-in zoom-in-95 duration-500 bg-slate-900 overflow-hidden relative">
+        <div className="flex-1 flex flex-col animate-in fade-in duration-500 bg-slate-900 overflow-hidden relative">
 
-            <div className="flex-1 overflow-y-auto pb-24 px-4 pt-6">
-                {/* Placeholder Header */}
-                <div className="flex items-center gap-4 mb-8">
-                    <div className="w-16 h-16 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center shrink-0">
-                        <span className="text-2xl">🧙‍♂️</span>
-                    </div>
-                    <div className="flex-1">
-                        <h1 className="font-heading text-2xl text-white">Player One</h1>
-                        <p className="text-amber-500 font-heading text-sm">Level 1 Novice</p>
-                    </div>
+            {/* Toast: Level Up */}
+            {levelUpToast && (
+                <div className="absolute top-4 left-4 right-4 z-50 bg-amber-500 text-slate-900 font-heading font-bold text-center py-3 px-4 rounded-lg shadow-glow-gold animate-in slide-in-from-top duration-300">
+                    <Sparkles className="w-5 h-5 inline mr-2" />
+                    {levelUpToast}
                 </div>
+            )}
+            {/* Toast: Achievement */}
+            {achievementToast && (
+                <div className="absolute top-16 left-4 right-4 z-50 bg-emerald-600 text-white font-heading text-center py-3 px-4 rounded-lg shadow-glow-emerald animate-in slide-in-from-top duration-300 text-sm">
+                    {achievementToast}
+                </div>
+            )}
 
-                {/* Placeholder Quests list to show redirect worked */}
-                <div className="space-y-4">
-                    <h2 className="font-heading text-xl text-slate-300">Daily Quests</h2>
+            <div className="flex-1 overflow-y-auto pb-24 px-4 pt-6 space-y-6">
 
-                    <div className="bg-slate-800 border border-slate-700 p-4 rounded-lg flex items-start gap-4 shadow-hud opacity-60">
-                        <div className="w-6 h-6 rounded bg-slate-900 border border-slate-600 mt-0.5"></div>
-                        <div>
-                            <p className="font-medium text-white">(Generated Quests will appear here)</p>
-                            <p className="text-amber-500 text-sm font-mono mt-1">+15 XP</p>
+                {/* Character Card */}
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-5 shadow-hud">
+                    <div className="flex items-center gap-4 mb-4">
+                        <div className="w-14 h-14 rounded-full bg-slate-700 border-2 border-amber-500/40 flex items-center justify-center shrink-0 shadow-glow-gold">
+                            <span className="text-2xl">🧙‍♂️</span>
+                        </div>
+                        <div className="flex-1">
+                            <h1 className="font-heading text-xl text-white">{profile?.username || 'Hero'}</h1>
+                            <p className="text-amber-500 font-heading text-sm">Level {currentLevel}</p>
+                        </div>
+                        <button onClick={handleSignOut} className="text-slate-500 hover:text-slate-300 transition-colors p-2">
+                            <LogOut className="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    {/* XP Bar */}
+                    <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                            <span className="text-slate-400">XP</span>
+                            <span className="text-amber-500 font-mono">{currentXP} / {nextLevelXP}</span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-900 rounded-full overflow-hidden shadow-inner-panel">
+                            <div
+                                className="h-full bg-amber-500 rounded-full transition-all duration-700 shadow-glow-gold"
+                                style={{ width: `${xpPercent}%` }}
+                            />
                         </div>
                     </div>
+
+                    {/* Quick Stats Row */}
+                    <div className="flex items-center gap-4 mt-4">
+                        <div className="flex items-center gap-1.5 text-sm">
+                            <Flame className="w-4 h-4 text-orange-500" />
+                            <span className="text-slate-300 font-mono">{streak?.current_streak ?? 0}</span>
+                            <span className="text-slate-500 text-xs">day streak</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm">
+                            <Coins className="w-4 h-4 text-yellow-500" />
+                            <span className="text-slate-300 font-mono">{profile?.gold ?? 0}</span>
+                        </div>
+                        {streak && streak.xp_multiplier > 1 && (
+                            <span className="text-emerald-400 text-xs font-mono">×{streak.xp_multiplier} XP</span>
+                        )}
+                    </div>
                 </div>
+
+                {/* Daily Quests */}
+                {dailyQuests.length > 0 && (
+                    <div>
+                        <h2 className="font-heading text-lg text-slate-300 mb-3">Daily Quests</h2>
+                        <div className="space-y-2.5">
+                            {dailyQuests.map(q => (
+                                <QuestCard
+                                    key={q.id}
+                                    quest={q}
+                                    isCompleted={completedQuestIds.has(q.id)}
+                                    onComplete={handleCompleteQuest}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Boss Quest */}
+                {bossQuest && (
+                    <div>
+                        <h2 className="font-heading text-lg text-red-400 mb-3">⚔ Weekly Boss</h2>
+                        <QuestCard
+                            quest={bossQuest}
+                            isCompleted={completedQuestIds.has(bossQuest.id)}
+                            onComplete={handleCompleteQuest}
+                        />
+                    </div>
+                )}
+
+                {/* Side Quests */}
+                {sideQuests.length > 0 && (
+                    <div>
+                        <h2 className="font-heading text-lg text-slate-400 mb-3">Side Quests</h2>
+                        <div className="space-y-2.5">
+                            {sideQuests.map(q => (
+                                <QuestCard
+                                    key={q.id}
+                                    quest={q}
+                                    isCompleted={completedQuestIds.has(q.id)}
+                                    onComplete={handleCompleteQuest}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Character Stats */}
+                <div>
+                    <h2 className="font-heading text-lg text-slate-300 mb-3">Character Stats</h2>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-3 shadow-hud">
+                        <StatBar label="Strength" value={profile?.stat_strength ?? 0} color="bg-red-500" />
+                        <StatBar label="Knowledge" value={profile?.stat_knowledge ?? 0} color="bg-blue-500" />
+                        <StatBar label="Wealth" value={profile?.stat_wealth ?? 0} color="bg-yellow-500" />
+                        <StatBar label="Adventure" value={profile?.stat_adventure ?? 0} color="bg-purple-500" />
+                        <StatBar label="Social" value={profile?.stat_social ?? 0} color="bg-pink-500" />
+                    </div>
+                </div>
+
+                {/* Empty state */}
+                {quests.length === 0 && (
+                    <div className="text-center py-12">
+                        <p className="text-slate-500 text-sm">No quests yet. Complete onboarding to generate your quests!</p>
+                    </div>
+                )}
             </div>
 
             {/* Bottom HUD Navigation */}
-            <div className="absolute bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-4 pb-safe flex justify-around items-center">
+            <div className="absolute bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-4 flex justify-around items-center">
                 <button className="flex flex-col items-center gap-1 text-amber-500 group">
-                    <Shield className="w-6 h-6 group-hover:scale-110 transition-transform drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
+                    <Shield className="w-6 h-6 drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
                     <span className="text-[10px] font-heading tracking-widest uppercase">Dash</span>
                 </button>
                 <button className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
