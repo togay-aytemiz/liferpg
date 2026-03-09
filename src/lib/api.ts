@@ -64,6 +64,7 @@ export interface CompleteQuestResponse {
     xp_multiplier: number;
     new_achievements: string[];
     stat_updated: string | null;
+    new_hp: number;
 }
 
 /**
@@ -109,7 +110,7 @@ export async function generateRewards(): Promise<{ success: boolean; rewards: Ar
  * Records that the user doesn't want this quest type. Used as negative feedback for LLM.
  * Returns the replaced quest to immediately inject into the UI.
  */
-export async function skipQuest(questId: string, reason: string): Promise<{ success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string }> {
+export async function skipQuest(questId: string, reason: string): Promise<{ success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string; hp_lost: number; died: boolean; gold_lost: number; current_hp: number }> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Not authenticated');
 
@@ -140,5 +141,5 @@ export async function skipQuest(questId: string, reason: string): Promise<{ succ
         throw new Error(response.data.message);
     }
 
-    return response.data as { success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string };
+    return response.data as { success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string; hp_lost: number; died: boolean; gold_lost: number; current_hp: number };
 }

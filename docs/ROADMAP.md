@@ -34,9 +34,10 @@ This document tracks the structured phases of development for the lifeRPG projec
 ---
 
 ## Post-MVP (Future Features)
+- [x] HP (Health Points) system and death penalties (loss of streak and gold)
 - [ ] Guild system (friends / accountability groups)
 - [ ] PvP challenges (step competitions, productivity battles)
 - [ ] Leaderboards
-- [ ] AI quest generation (AI suggests daily quests) ← ✅ Already implemented via Edge Functions
+- [x] AI quest generation (AI suggests daily quests)
 - [ ] Loot system (random reward drops)
 - [ ] Character cosmetics

@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { completeQuest, type CompleteQuestResponse } from '../lib/api';
 import type { Quest, Streak, LevelThreshold, Reward } from '../lib/database.types';
-import { Shield, Swords, Crown, Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Settings } from 'lucide-react';
+import { Shield, Swords, Crown, Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Settings, Heart } from 'lucide-react';
 
 // Stat bar component
 function StatBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
@@ -245,6 +245,20 @@ export default function Dashboard() {
                             <div
                                 className="h-full bg-amber-500 rounded-full transition-all duration-700 shadow-glow-gold"
                                 style={{ width: `${xpPercent}%` }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* HP Bar */}
+                    <div className="space-y-1 mt-3">
+                        <div className="flex justify-between text-xs">
+                            <span className="text-slate-400 flex items-center gap-1"><Heart className="w-3 h-3 text-red-500" fill="currentColor" /> HP</span>
+                            <span className="text-red-500 font-mono">{profile?.hp ?? 100} / {profile?.max_hp ?? 100}</span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-900 rounded-full overflow-hidden shadow-inner-panel">
+                            <div
+                                className="h-full bg-red-500 rounded-full transition-all duration-700"
+                                style={{ width: `${Math.min(((profile?.hp ?? 100) / Math.max(profile?.max_hp ?? 100, 1)) * 100, 100)}%`, boxShadow: '0 0 10px rgba(239,68,68,0.5)' }}
                             />
                         </div>
                     </div>

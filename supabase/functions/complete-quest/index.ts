@@ -135,11 +135,16 @@ serve(async (req) => {
         const didLevelUp = newLevel > (profile?.level ?? 1);
 
         // Build stat update
+        const maxHp = profile?.max_hp ?? 100;
+        const currentHp = profile?.hp ?? 100;
+        const newHp = Math.min(maxHp, currentHp + 2); // Heal +2 HP
+
         const statField = quest.stat_affected ? `stat_${quest.stat_affected}` : null;
         const statUpdate: Record<string, unknown> = {
             xp: newXP,
             gold: newGold,
             level: newLevel,
+            hp: newHp,
         };
         if (statField && profile) {
             const currentStatValue = (profile as Record<string, unknown>)[statField] as number ?? 0;
@@ -253,6 +258,7 @@ serve(async (req) => {
                 xp_multiplier: newMultiplier,
                 new_achievements: newAchievements,
                 stat_updated: quest.stat_affected,
+                new_hp: newHp,
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );

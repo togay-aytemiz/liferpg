@@ -119,12 +119,39 @@ serve(async (req) => {
         // Pass full user context + skip reasons so LLM learns immediately.
         // =================================================================
 
-        // 5a. Fetch user profile (rhythm, preferences, stats)
+        // 5a. Fetch user profile (rhythm, preferences, stats, hp, gold)
         const { data: profile } = await supabase
             .from("profiles")
-            .select("life_rhythm, likes, dislikes, focus_areas, level, stat_strength, stat_knowledge, stat_wealth, stat_adventure, stat_social")
+            .select("hp, max_hp, gold, life_rhythm, likes, dislikes, focus_areas, level, stat_strength, stat_knowledge, stat_wealth, stat_adventure, stat_social")
             .eq("id", user.id)
             .single();
+
+        // --- HP PENALTY & DEATH SYSTEM ---
+        let died = false;
+        let hpLost = 5;
+        let goldLost = 0;
+        let newHP = (profile?.hp ?? 100) - hpLost;
+        let newGold = profile?.gold ?? 0;
+
+        if (newHP <= 0) {
+            died = true;
+            newHP = profile?.max_hp ?? 100;
+            goldLost = Math.floor(newGold / 2);
+            newGold -= goldLost;
+
+            // Reset streak
+            await supabase
+                .from("streaks")
+                .update({ current_streak: 0, last_active_date: null })
+                .eq("user_id", user.id);
+        }
+
+        // Apply HP/Gold update
+        await supabase
+            .from("profiles")
+            .update({ hp: newHP, gold: newGold })
+            .eq("id", user.id);
+        // ---------------------------------
 
         // 5b. Fetch history (completed & skipped)
         const { data: completedQuests } = await supabase
@@ -218,8 +245,14 @@ Return valid JSON:
                 skip_reason: reason,
                 remaining_skips: remainingSkips,
                 max_skips: MAX_DAILY_SKIPS,
-                message: newQuest ? `Quest skipped. Generated replacement: "${newQuest.title}"` : `Quest skipped.`,
-                new_quest: newQuest
+                message: newQuest
+                    ? `Quest skipped. Generated replacement: "${newQuest.title}"`
+                    : `Quest skipped.`,
+                new_quest: newQuest,
+                hp_lost: hpLost,
+                died: died,
+                gold_lost: goldLost,
+                current_hp: newHP
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );

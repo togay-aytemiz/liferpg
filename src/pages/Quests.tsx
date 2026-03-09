@@ -82,7 +82,16 @@ export default function Quests() {
                 }
                 return filtered;
             });
-            showToast(result.message || `Quest skipped. ${result.remaining_skips} skips left today.`);
+
+            await refreshProfile();
+
+            if (result.died) {
+                showToast(`☠️ YOU DIED! Lost half gold & streak reset.`, 'error');
+            } else if (result.hp_lost) {
+                showToast(`-${result.hp_lost} HP | ${result.message || 'Quest skipped.'}`, 'error');
+            } else {
+                showToast(result.message || `Quest skipped. ${result.remaining_skips} skips left today.`);
+            }
         } catch (err: any) {
             console.error(err);
             showToast(err.message || 'Failed to skip quest', 'error');

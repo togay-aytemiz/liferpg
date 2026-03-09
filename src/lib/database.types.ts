@@ -20,9 +20,14 @@ export interface Profile {
     likes: string | null;
     dislikes: string | null;
     focus_areas: string | null;
+
+    // Core Attributes
     level: number;
     xp: number;
     gold: number;
+    hp: number;
+    max_hp: number;
+
     stat_strength: number;
     stat_knowledge: number;
     stat_wealth: number;
