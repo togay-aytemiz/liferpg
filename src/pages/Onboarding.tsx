@@ -19,6 +19,7 @@ export default function Onboarding() {
         // Save life_rhythm to user profile in Supabase
         const { error } = await supabase
             .from('profiles')
+            // @ts-ignore - Supabase types fallback to 'never' incorrectly here
             .update({ life_rhythm: lifeRhythm.trim() })
             .eq('id', user.id);
 

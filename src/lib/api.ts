@@ -107,7 +107,7 @@ export async function generateRewards(): Promise<{ success: boolean; rewards: Ar
  * Call the skip-quest Edge Function.
  * Records that the user doesn't want this quest type. Used as negative feedback for LLM.
  */
-export async function skipQuest(questId: string, reason?: string): Promise<{ success: boolean; skipped_quest: string }> {
+export async function skipQuest(questId: string, reason: string): Promise<{ success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number }> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Not authenticated');
 
@@ -116,8 +116,27 @@ export async function skipQuest(questId: string, reason?: string): Promise<{ suc
     });
 
     if (response.error) {
+        // Attempt to extract the custom message if the limit was reached
+        if (response.error.context && typeof response.error.context === 'object') {
+            const errorData = response.error.context as any;
+            if (errorData?.body) {
+                try {
+                    const parsed = JSON.parse(errorData.body);
+                    if (parsed.message) throw new Error(parsed.message);
+                } catch {
+                    // ignore parse errors
+                }
+            }
+        }
+
+        // Fallback standard error extraction (Supabase functions sometimes wrap errors differently depending on the client version)
         throw new Error(response.error.message || 'Failed to skip quest');
     }
 
-    return response.data as { success: boolean; skipped_quest: string };
+    // Double check if Edge function returned a 400/429 without throwing 'response.error' but mapped differently (depends on library version)
+    if (response.data && response.data.error && response.data.message) {
+        throw new Error(response.data.message);
+    }
+
+    return response.data as { success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number };
 }

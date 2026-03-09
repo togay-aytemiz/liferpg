@@ -28,6 +28,7 @@ export default function Settings() {
 
         await supabase
             .from('profiles')
+            // @ts-ignore
             .update({ username: username.trim() || null })
             .eq('id', user.id);
 
@@ -46,6 +47,7 @@ export default function Settings() {
             // Save updated life rhythm
             await supabase
                 .from('profiles')
+                // @ts-ignore
                 .update({ life_rhythm: lifeRhythm.trim() })
                 .eq('id', user.id);
 

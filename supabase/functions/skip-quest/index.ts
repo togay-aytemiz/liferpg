@@ -1,17 +1,21 @@
 // supabase/functions/skip-quest/index.ts
-// Edge Function: Handle quest skip/dislike.
+// Edge Function: Handle quest skip/dislike with REASON tracking.
 //
-// Records that the user doesn't want this type of quest.
-// This data is passed as context to regenerate-quests so the LLM
-// avoids generating similar quests in the future.
+// Records WHY the user doesn't want this quest.
+// Enforces a daily skip limit (max 3 per day).
+// This data is passed as enriched context to regenerate-quests
+// so the LLM avoids generating similar quests in the future.
 //
 // Flow:
-//   1. Record the skip in user_quests with is_completed = false
-//   2. Deactivate the quest
-//   3. Return skipped quest titles for frontend reference
+//   1. Check daily skip count (max 3)
+//   2. Record the skip in user_quests with skip reason
+//   3. Deactivate the quest
+//   4. Return remaining skips for the day
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+
+const MAX_DAILY_SKIPS = 3;
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -44,10 +48,40 @@ serve(async (req) => {
             );
         }
 
-        // Fetch the quest to get its title for feedback storage
+        if (!reason || typeof reason !== "string") {
+            return new Response(
+                JSON.stringify({ error: "reason is required (why are you skipping?)" }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        const today = new Date().toISOString().split("T")[0];
+
+        // 1. Check daily skip count
+        const { count: todaySkips } = await supabase
+            .from("user_quests")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", user.id)
+            .eq("quest_date", today)
+            .eq("is_completed", false)
+            .not("xp_awarded", "gt", 0); // skipped quests have xp_awarded = 0
+
+        if ((todaySkips ?? 0) >= MAX_DAILY_SKIPS) {
+            return new Response(
+                JSON.stringify({
+                    error: "Daily skip limit reached",
+                    limit_reached: true,
+                    max_skips: MAX_DAILY_SKIPS,
+                    message: `You can only skip ${MAX_DAILY_SKIPS} quests per day. Try completing this one or come back tomorrow!`,
+                }),
+                { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        // 2. Fetch the quest to get its details
         const { data: quest } = await supabase
             .from("quests")
-            .select("title, quest_type, stat_affected")
+            .select("title, quest_type, stat_affected, difficulty")
             .eq("id", quest_id)
             .single();
 
@@ -58,8 +92,7 @@ serve(async (req) => {
             );
         }
 
-        // Record skip in user_quests (is_completed = false, with skip reason)
-        const today = new Date().toISOString().split("T")[0];
+        // 3. Record skip in user_quests with the skip reason
         await supabase
             .from("user_quests")
             .upsert({
@@ -69,42 +102,25 @@ serve(async (req) => {
                 is_completed: false,
                 xp_awarded: 0,
                 gold_awarded: 0,
+                skip_reason: reason,
             }, { onConflict: "user_id,quest_id,quest_date" });
 
-        // Deactivate the quest so it no longer appears
+        // 4. Deactivate the quest so it no longer appears
         await supabase
             .from("quests")
             .update({ is_active: false })
             .eq("id", quest_id);
 
-        // Store skip feedback in user's profile metadata
-        // We append to a JSON array in a dedicated column or use a simple approach:
-        // fetch existing skipped titles, append this one
-        const { data: profile } = await supabase
-            .from("profiles")
-            .select("life_rhythm")
-            .eq("id", user.id)
-            .single();
-
-        // Store skip history — we'll use this when regenerating quests
-        // The regenerate-quests function will read skipped quests and tell the LLM to avoid them
-        const skipRecord = {
-            title: quest.title,
-            type: quest.quest_type,
-            stat: quest.stat_affected,
-            reason: reason || "not interested",
-            date: today,
-        };
-
-        // We store skips in a simple approach: append to a localStorage-style key
-        // In production, you'd have a proper skipped_quests table
-        // For now, we'll rely on the user_quests table where is_completed=false serves as "skipped"
+        const remainingSkips = MAX_DAILY_SKIPS - ((todaySkips ?? 0) + 1);
 
         return new Response(
             JSON.stringify({
                 success: true,
                 skipped_quest: quest.title,
-                message: "Quest removed. Future quest generation will consider your preferences.",
+                skip_reason: reason,
+                remaining_skips: remainingSkips,
+                max_skips: MAX_DAILY_SKIPS,
+                message: `Quest removed. ${remainingSkips} skip${remainingSkips !== 1 ? 's' : ''} remaining today.`,
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );

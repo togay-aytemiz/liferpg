@@ -61,6 +61,7 @@ export interface UserQuest {
     completed_at: string | null;
     xp_awarded: number;
     gold_awarded: number;
+    skip_reason: string | null;
     created_at: string;
 }
 
@@ -110,43 +111,43 @@ export interface Database {
         Tables: {
             profiles: {
                 Row: Profile;
-                Insert: Partial<Profile> & { id: string };
-                Update: Partial<Omit<Profile, 'id' | 'created_at'>>;
+                Insert: Partial<Profile>;
+                Update: Partial<Profile>;
             };
             level_thresholds: {
                 Row: LevelThreshold;
-                Insert: LevelThreshold;
+                Insert: Partial<LevelThreshold>;
                 Update: Partial<LevelThreshold>;
             };
             quests: {
                 Row: Quest;
-                Insert: Partial<Quest> & { title: string; user_id: string };
-                Update: Partial<Omit<Quest, 'id' | 'created_at'>>;
+                Insert: Partial<Quest>;
+                Update: Partial<Quest>;
             };
             user_quests: {
                 Row: UserQuest;
-                Insert: Partial<UserQuest> & { user_id: string; quest_id: string };
-                Update: Partial<Omit<UserQuest, 'id' | 'created_at'>>;
+                Insert: Partial<UserQuest>;
+                Update: Partial<UserQuest>;
             };
             achievements: {
                 Row: Achievement;
-                Insert: Partial<Achievement> & { title: string };
-                Update: Partial<Omit<Achievement, 'id' | 'created_at'>>;
+                Insert: Partial<Achievement>;
+                Update: Partial<Achievement>;
             };
             user_achievements: {
                 Row: UserAchievement;
-                Insert: Partial<UserAchievement> & { user_id: string; achievement_id: string };
-                Update: Partial<Omit<UserAchievement, 'id'>>;
+                Insert: Partial<UserAchievement>;
+                Update: Partial<UserAchievement>;
             };
             streaks: {
                 Row: Streak;
-                Insert: Partial<Streak> & { user_id: string };
-                Update: Partial<Omit<Streak, 'id' | 'created_at'>>;
+                Insert: Partial<Streak>;
+                Update: Partial<Streak>;
             };
             rewards: {
                 Row: Reward;
-                Insert: Partial<Reward> & { user_id: string; title: string };
-                Update: Partial<Omit<Reward, 'id' | 'created_at'>>;
+                Insert: Partial<Reward>;
+                Update: Partial<Reward>;
             };
         };
         Enums: {

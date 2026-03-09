@@ -13,6 +13,7 @@ export default function Quests() {
     const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
     const [loadingId, setLoadingId] = useState<string | null>(null);
     const [skippingId, setSkippingId] = useState<string | null>(null);
+    const [skipModalOpen, setSkipModalOpen] = useState<{ id: string; title: string } | null>(null);
     const [tab, setTab] = useState<'daily' | 'side' | 'boss'>('daily');
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
@@ -58,17 +59,24 @@ export default function Quests() {
         setLoadingId(null);
     };
 
-    const handleSkip = async (questId: string, title: string) => {
+    const handleSkipClick = (questId: string, title: string) => {
         if (loadingId || skippingId) return;
-        setSkippingId(questId);
+        setSkipModalOpen({ id: questId, title });
+    };
+
+    const confirmSkip = async (reason: string) => {
+        if (!skipModalOpen) return;
+        const { id, title } = skipModalOpen;
+        setSkippingId(id);
+        setSkipModalOpen(null); // Close modal
         try {
-            await skipQuest(questId, 'not interested');
+            const result = await skipQuest(id, reason);
             // Remove from local list
-            setQuests(prev => prev.filter(q => q.id !== questId));
-            showToast(`"${title}" removed. Future quests will adapt.`);
-        } catch (err) {
+            setQuests(prev => prev.filter(q => q.id !== id));
+            showToast(`"${title}" skipped. ${result.remaining_skips} skips left today.`);
+        } catch (err: any) {
             console.error(err);
-            showToast('Failed to skip quest', 'error');
+            showToast(err.message || 'Failed to skip quest', 'error');
         }
         setSkippingId(null);
     };
@@ -113,8 +121,8 @@ export default function Quests() {
             {/* Toast */}
             {toast && (
                 <div className={`mx-4 mb-3 px-4 py-2.5 rounded-lg text-sm text-center animate-in fade-in slide-in-from-top-2 duration-200 ${toast.type === 'error'
-                        ? 'bg-red-900/40 border border-red-800 text-red-400'
-                        : 'bg-emerald-900/40 border border-emerald-800 text-emerald-400'
+                    ? 'bg-red-900/40 border border-red-800 text-red-400'
+                    : 'bg-emerald-900/40 border border-emerald-800 text-emerald-400'
                     }`}>
                     {toast.msg}
                 </div>
@@ -158,7 +166,7 @@ export default function Quests() {
                             {/* Skip/Dislike button */}
                             {!done && (
                                 <button
-                                    onClick={() => handleSkip(q.id, q.title)}
+                                    onClick={() => handleSkipClick(q.id, q.title)}
                                     disabled={!!loadingId || !!skippingId}
                                     title="Skip this quest"
                                     className="text-slate-600 hover:text-red-400 transition-colors p-1 mt-0.5 shrink-0"
@@ -174,6 +182,36 @@ export default function Quests() {
                     );
                 })}
             </div>
+
+            {/* Skip Modal */}
+            {skipModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-200">
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-sm w-full p-5 shadow-xl animate-in fade-in zoom-in-95 duration-200">
+                        <h3 className="font-heading text-lg text-white mb-2">Skip Quest</h3>
+                        <p className="text-slate-400 text-sm mb-4">
+                            Why are you skipping "<span className="text-white">{skipModalOpen.title}</span>"?
+                            This helps us generate better quests for you.
+                        </p>
+                        <div className="space-y-2 mb-5">
+                            {['Takes too much time', 'Too difficult right now', 'Not interested', "Doesn't fit my routine"].map(reason => (
+                                <button
+                                    key={reason}
+                                    onClick={() => confirmSkip(reason)}
+                                    className="w-full text-left px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 text-slate-300 transition-colors text-sm"
+                                >
+                                    {reason}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => setSkipModalOpen(null)}
+                            className="w-full py-2 rounded-lg font-heading tracking-wide uppercase text-sm border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

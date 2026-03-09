@@ -21,7 +21,7 @@ All notable changes to this project will be documented in this file.
 - **Quest Screen:** Dedicated tabbed view (Daily / Side / Boss) with quest completion
 - **Settings Screen:** Username editing, Life Rhythm editing with quest + reward regeneration via Edge Functions
 - **Character & Achievements Screen:** Full character card, stat bars, and achievement grid with rarity-colored cards (common → legendary)
-- **Quest Skip/Dislike:** Users can skip quests they don't want — LLM uses this as negative feedback for smarter regeneration
+- **Quest Skip & Reason Modal:** Users can skip quests up to 3 times a day by picking a reason (e.g. "Too difficult", "Takes too much time"). This reason is sent to the LLM as explicit negative feedback for smarter future regeneration.
 - **AI Robustness:** OpenAI retry with exponential backoff (3 attempts), response validation with field whitelisting, duplicate completion guard
 
 ### Changed

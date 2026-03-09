@@ -115,7 +115,7 @@ serve(async (req) => {
         // 3b. Fetch skipped/disliked quests for negative feedback
         const { data: skippedQuests } = await supabase
             .from("user_quests")
-            .select("quest_id, quests(title, quest_type, stat_affected)")
+            .select("quest_id, skip_reason, quests(title, quest_type, stat_affected)")
             .eq("user_id", user.id)
             .eq("is_completed", false)
             .limit(20);
@@ -123,8 +123,9 @@ serve(async (req) => {
         const skipContext = skippedQuests && skippedQuests.length > 0
             ? `\n\nQuests the user SKIPPED/DISLIKED (avoid similar ones): ${skippedQuests.map((q: Record<string, unknown>) => {
                 const quest = q.quests as Record<string, string> | null;
-                return quest?.title ?? "Unknown";
-            }).join(", ")}`
+                const reasonStr = q.skip_reason ? `(Reason skipped: ${q.skip_reason})` : "";
+                return `${quest?.title ?? "Unknown"} ${reasonStr}`.trim();
+            }).join(" | ")}`
             : "";
 
         // 4. Call OpenAI
