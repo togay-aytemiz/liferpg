@@ -1,19 +1,37 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import { Scroll, Sparkles } from 'lucide-react';
 
 export default function Onboarding() {
     const navigate = useNavigate();
+    const { user, refreshProfile } = useAuth();
     const [lifeRhythm, setLifeRhythm] = useState('');
+    const [saving, setSaving] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!lifeRhythm.trim()) return;
+        if (!lifeRhythm.trim() || !user) return;
 
-        // TODO: In a real app, save 'lifeRhythm' to Supabase user profile here.
-        // For MVP flow, we just simulate saving and move to the loading screen.
+        setSaving(true);
 
-        // Store temporarily in memory/local for demo if needed, but navigate immediately:
+        // Save life_rhythm to user profile in Supabase
+        const { error } = await supabase
+            .from('profiles')
+            .update({ life_rhythm: lifeRhythm.trim() })
+            .eq('id', user.id);
+
+        if (error) {
+            console.error('Failed to save life rhythm:', error);
+            setSaving(false);
+            return;
+        }
+
+        // Refresh the profile in context so routing knows life_rhythm is set
+        await refreshProfile();
+
+        // Navigate to the quest generation loading screen
         navigate('/generating');
     };
 
@@ -65,13 +83,18 @@ export default function Onboarding() {
                 <div className="mt-8">
                     <button
                         type="submit"
-                        disabled={lifeRhythm.trim().length < 10}
+                        disabled={lifeRhythm.trim().length < 10 || saving}
                         className="w-full relative group bg-amber-500 hover:bg-amber-400 disabled:bg-slate-700 disabled:text-slate-500 text-slate-900 font-heading font-bold text-lg py-4 rounded-lg shadow-glow-gold transition-all duration-300 disabled:shadow-none overflow-hidden flex items-center justify-center gap-2"
                     >
-                        {/* Soft inner highlight / metallic sheen */}
                         <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <Sparkles className="w-5 h-5" />
-                        Generate My Quests
+                        {saving ? (
+                            <div className="w-6 h-6 border-2 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
+                        ) : (
+                            <>
+                                <Sparkles className="w-5 h-5" />
+                                Generate My Quests
+                            </>
+                        )}
                     </button>
 
                     <p className="text-center text-xs text-slate-500 mt-4">
