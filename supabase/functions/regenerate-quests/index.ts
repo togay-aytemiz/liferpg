@@ -145,7 +145,7 @@ serve(async (req) => {
                 { role: "system", content: SYSTEM_PROMPT },
                 {
                     role: "user",
-                    content: `Here is my updated daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${historyContext}${skipContext}\n\nPlease generate quests highly tailored to my routine, my focus areas, and my likes. Strictly AVOID what I hate!`,
+                    content: `Here is my updated daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${historyContext}${skipContext}\n\nPlease generate quests highly tailored to my routine, my focus areas, and my likes. Strictly AVOID what I hate! Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).`,
                 },
             ],
             {

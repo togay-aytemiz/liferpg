@@ -119,7 +119,7 @@ serve(async (req) => {
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}\n\nPlease generate quests highly tailored to this routine, my focus areas, and my likes. Strictly AVOID what I hate!` },
+                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}\n\nPlease generate quests highly tailored to this routine, my focus areas, and my likes. Strictly AVOID what I hate! Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).` },
             ],
             {
                 model: "gpt-4o-mini",

@@ -186,7 +186,7 @@ serve(async (req) => {
 
         const replacementPrompt = `You are a game master for LifeRPG. The user just skipped a ${quest.quest_type} quest titled "${quest.title}" because: "${reason}".
         
-Your job is to generate EXACTLY ONE replacement ${quest.quest_type} quest that fits their routine but AVOIDS what they disliked.
+Your job is to generate EXACTLY ONE replacement ${quest.quest_type} quest that fits their routine but AVOIDS what they disliked. Feel free to make it a meaningful "Avoidance/Negative" goal (e.g., "Do not smoke", "No sugar today") that tests their willpower if it fits their profile.
 
 User's Daily Routine:
 ${profile?.life_rhythm || "General healthy lifestyle"}${likesText}${dislikesText}${focusText}
