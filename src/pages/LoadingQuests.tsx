@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Compass } from 'lucide-react';
+import { generateQuests } from '../lib/api';
 
 const GENERATION_STEPS = [
     "Analyzing your daily rhythm...",
@@ -11,37 +12,66 @@ const GENERATION_STEPS = [
 
 export default function LoadingQuests() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [stepIndex, setStepIndex] = useState(0);
     const [progress, setProgress] = useState(0);
+    const [error, setError] = useState('');
+    const calledRef = useRef(false);
 
     useEffect(() => {
-        // Total simulated loading time: ~4 seconds
-        const totalDuration = 4000;
-        const intervalTime = 50; // Update frequency
-        const totalTicks = totalDuration / intervalTime;
+        if (calledRef.current) return;
+        calledRef.current = true;
+
+        const lifeRhythm = (location.state as { lifeRhythm?: string })?.lifeRhythm;
+
+        // Start the visual progress animation
+        const totalVisualDuration = 6000; // 6s minimum visual duration
+        const intervalTime = 60;
+        const totalTicks = totalVisualDuration / intervalTime;
         let currentTick = 0;
+        let aiDone = false;
+        let aiSuccess = false;
 
         const timer = setInterval(() => {
             currentTick++;
-            const currentProgress = Math.min((currentTick / totalTicks) * 100, 100);
+            // Progress goes up to 90% during AI call, then jumps to 100% when done
+            const maxProgress = aiDone ? 100 : 90;
+            const currentProgress = Math.min((currentTick / totalTicks) * 100, maxProgress);
             setProgress(currentProgress);
 
-            // Determine the text step based on progress
             if (currentProgress < 25) setStepIndex(0);
             else if (currentProgress < 50) setStepIndex(1);
-            else if (currentProgress < 85) setStepIndex(2);
+            else if (currentProgress < 80) setStepIndex(2);
             else setStepIndex(3);
 
-            if (currentProgress >= 100) {
+            if (aiDone && currentProgress >= 100) {
                 clearInterval(timer);
-                setTimeout(() => {
-                    navigate('/dashboard');
-                }, 500); // Tiny pause at 100% before jumping
+                if (aiSuccess) {
+                    setTimeout(() => navigate('/dashboard'), 400);
+                }
             }
         }, intervalTime);
 
+        // Actually call the AI Edge Function
+        const callAI = async () => {
+            try {
+                if (lifeRhythm) {
+                    await generateQuests(lifeRhythm);
+                }
+                aiSuccess = true;
+            } catch (err) {
+                console.error('Quest generation failed:', err);
+                setError('Quest generation failed. You can retry from Settings.');
+                aiSuccess = true; // Still navigate to dashboard
+            } finally {
+                aiDone = true;
+            }
+        };
+
+        callAI();
+
         return () => clearInterval(timer);
-    }, [navigate]);
+    }, [navigate, location.state]);
 
     return (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-700">
@@ -62,29 +92,28 @@ export default function LoadingQuests() {
 
             {/* RPG Progress Bar */}
             <div className="w-full max-w-xs space-y-4">
-                {/* Step Text (Simulated logs) */}
                 <div className="h-6 flex items-center justify-center">
                     <p className="text-amber-500 text-sm font-mono tracking-wider animate-pulse">
                         {GENERATION_STEPS[stepIndex]}
                     </p>
                 </div>
 
-                {/* The Bar Track */}
                 <div className="w-full h-4 bg-slate-800 rounded-full shadow-inner-panel overflow-hidden border border-slate-700/50 p-0.5 relative">
-                    {/* The Glowing Fill */}
                     <div
                         className="h-full bg-amber-500 rounded-full transition-all duration-75 ease-linear shadow-glow-gold relative overflow-hidden"
                         style={{ width: `${progress}%` }}
                     >
-                        {/* Shimmer effect inside the bar */}
                         <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]"></div>
                     </div>
                 </div>
 
-                {/* Percentage Counter */}
                 <p className="text-slate-500 font-mono text-xs">
                     {Math.floor(progress)}%
                 </p>
+
+                {error && (
+                    <p className="text-red-400 text-xs mt-4">{error}</p>
+                )}
             </div>
 
         </div>

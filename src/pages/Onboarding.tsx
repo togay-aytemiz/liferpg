@@ -31,8 +31,8 @@ export default function Onboarding() {
         // Refresh the profile in context so routing knows life_rhythm is set
         await refreshProfile();
 
-        // Navigate to the quest generation loading screen
-        navigate('/generating');
+        // Navigate to the quest generation loading screen, passing the text
+        navigate('/generating', { state: { lifeRhythm: lifeRhythm.trim() } });
     };
 
     return (

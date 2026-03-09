@@ -1,0 +1,190 @@
+// supabase/functions/generate-quests/index.ts
+// Edge Function: Generate personalized quests from user's life rhythm.
+//
+// Called after onboarding or when user updates their life rhythm in Settings.
+// Flow:
+//   1. Frontend sends { life_rhythm: string }
+//   2. We call OpenAI to analyze the text and generate quests
+//   3. We insert the generated quests into the `quests` table
+//   4. We return the generated quests to the frontend
+//
+// Auth: Requires valid Supabase JWT (user must be logged in)
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { callOpenAI } from "../_shared/openai.ts";
+import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+
+const SYSTEM_PROMPT = `You are a game master for LifeRPG, a gamified productivity app.
+
+Your job is to analyze a user's daily routine description and generate personalized quests.
+
+You MUST return valid JSON with this exact structure:
+{
+  "daily_quests": [
+    {
+      "title": "Quest title (short, action-oriented)",
+      "description": "Brief encouraging description",
+      "quest_type": "daily",
+      "difficulty": "easy" | "medium" | "hard",
+      "xp_reward": number (10-30),
+      "stat_affected": "strength" | "knowledge" | "wealth" | "adventure" | "social",
+      "stat_points": number (1-3)
+    }
+  ],
+  "side_quests": [
+    {
+      "title": "...",
+      "description": "...",
+      "quest_type": "side",
+      "difficulty": "easy" | "medium",
+      "xp_reward": number (5-15),
+      "stat_affected": "...",
+      "stat_points": 1
+    }
+  ],
+  "boss_quest": {
+    "title": "A big weekly challenge based on their goals",
+    "description": "Epic description",
+    "quest_type": "boss",
+    "difficulty": "hard" | "epic",
+    "xp_reward": number (80-150),
+    "stat_affected": "...",
+    "stat_points": number (3-5)
+  }
+}
+
+Rules:
+- Generate 4-6 daily quests based on the user's routine
+- Generate 2-3 fun side quests for variety
+- Generate 1 boss quest as a weekly challenge
+- Match activities to the correct stat category:
+  - Exercise/fitness → strength
+  - Reading/learning/studying → knowledge
+  - Work/career/finance → wealth
+  - Travel/new experiences/creativity → adventure
+  - Social events/networking/relationships → social
+- Make quests specific to what the user described, not generic
+- Quest titles should be concise and action-oriented (like RPG quest names)
+- XP rewards should match difficulty
+- Keep the tone motivating and RPG-themed`;
+
+serve(async (req) => {
+    // Handle CORS preflight
+    if (req.method === "OPTIONS") {
+        return new Response("ok", { headers: corsHeaders });
+    }
+
+    try {
+        // Verify authentication
+        const authHeader = req.headers.get("Authorization");
+        if (!authHeader) {
+            return new Response(
+                JSON.stringify({ error: "Missing authorization header" }),
+                { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        const supabase = createSupabaseClient(authHeader);
+
+        // Get current user
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError || !user) {
+            return new Response(
+                JSON.stringify({ error: "Unauthorized" }),
+                { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        // Parse request body
+        const { life_rhythm } = await req.json();
+        if (!life_rhythm || typeof life_rhythm !== "string") {
+            return new Response(
+                JSON.stringify({ error: "life_rhythm is required" }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        // Call OpenAI to generate quests
+        const aiResponse = await callOpenAI(
+            [
+                { role: "system", content: SYSTEM_PROMPT },
+                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}` },
+            ],
+            {
+                model: "gpt-4o-mini",
+                temperature: 0.7,
+                max_tokens: 2000,
+                response_format: { type: "json_object" },
+            }
+        );
+
+        // Parse the AI-generated quests
+        const generatedQuests = JSON.parse(aiResponse);
+
+        // Prepare quests for database insertion
+        const allQuests = [
+            ...generatedQuests.daily_quests.map((q: Record<string, unknown>) => ({
+                ...q,
+                user_id: user.id,
+                is_ai_generated: true,
+                is_active: true,
+                gold_reward: 0,
+            })),
+            ...generatedQuests.side_quests.map((q: Record<string, unknown>) => ({
+                ...q,
+                user_id: user.id,
+                is_ai_generated: true,
+                is_active: true,
+                gold_reward: 0,
+            })),
+            {
+                ...generatedQuests.boss_quest,
+                user_id: user.id,
+                is_ai_generated: true,
+                is_active: true,
+                gold_reward: 5,
+            },
+        ];
+
+        // Insert quests into database
+        const { data: insertedQuests, error: insertError } = await supabase
+            .from("quests")
+            .insert(allQuests)
+            .select();
+
+        if (insertError) {
+            console.error("Quest insert error:", insertError);
+            return new Response(
+                JSON.stringify({ error: "Failed to save quests", details: insertError.message }),
+                { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        // Also initialize streak record for this user if not exists
+        await supabase
+            .from("streaks")
+            .upsert({ user_id: user.id, current_streak: 0, longest_streak: 0, xp_multiplier: 1.0 },
+                { onConflict: "user_id" }
+            );
+
+        return new Response(
+            JSON.stringify({
+                success: true,
+                quests: insertedQuests,
+                summary: {
+                    daily: generatedQuests.daily_quests.length,
+                    side: generatedQuests.side_quests.length,
+                    boss: 1,
+                },
+            }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+
+    } catch (error) {
+        console.error("generate-quests error:", error);
+        return new Response(
+            JSON.stringify({ error: "Internal server error", details: String(error) }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+    }
+});
