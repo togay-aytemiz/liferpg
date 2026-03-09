@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - **Health Points (HP), Daily Penalties & Death:** Added a fully-integrated HP system (max 100). Characters lose HP by skipping quests (-5) or missing daily quests overnight (-10 via `daily-cron` Edge Function). If HP hits 0, they "die" (losing their ongoing streak and cutting their gold in half). Completing quests slowly heals the character (+2 HP).
 - **Custom Quests & Avoidance Goals:** Users can now click the `+` icon to add manual, custom quests. They simply write what they want to do (e.g. "Do laundry") or what they want to AVOID (e.g. "No fast food today"). The LLM evaluates the prompt, flags avoidance challenges as Willpower/Strength obstacles, and dynamically assigns difficulty, XP, Gold, and stat rewards.
 - **AI Robustness:** OpenAI retry with exponential backoff (3 attempts), response validation with field whitelisting, duplicate completion guard
+- **Quest Chains:** Implemented multi-step connected quests (2-4 steps) that unlock sequentially. Chained quests follow boss battles, starting locked/ghosted in the UI and automatically activating upon completion of the previous step. Includes frontend toast notifications for step unlocks.
 
 ### Changed
 - Replaced Vite boilerplate with RPG-themed application

@@ -2,6 +2,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './pages/Auth';
 import Onboarding from './pages/Onboarding';
+import LoadingQuests from './pages/LoadingQuests';
+import Dashboard from './pages/Dashboard';
 import Quests from './pages/Quests';
 import Achievements from './pages/Achievements';
 import Settings from './pages/Settings';
@@ -78,8 +80,14 @@ function AppRoutes() {
       <Route path="/onboarding" element={
         <ProtectedRoute><Onboarding /></ProtectedRoute>
       } />
+      <Route path="/generating" element={
+        <ProtectedRoute><LoadingQuests /></ProtectedRoute>
+      } />
+      <Route path="/dashboard" element={
+        <ProtectedRoute><Dashboard /></ProtectedRoute>
+      } />
       <Route path="/" element={
-        <ProtectedRoute><Quests /></ProtectedRoute>
+        <ProtectedRoute><Dashboard /></ProtectedRoute>
       } />
       <Route path="/quests" element={
         <ProtectedRoute><Quests /></ProtectedRoute>

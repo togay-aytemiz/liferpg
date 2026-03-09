@@ -28,7 +28,7 @@ serve(async (req) => {
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         if (userError || !user) throw new Error("Unauthorized");
 
-        const { prompt, quest_type } = await req.json();
+        const { prompt, quest_type, active_habits } = await req.json();
 
         if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
             return new Response(
@@ -54,6 +54,10 @@ If it is an Avoidance Goal:
 - The stat affected should generally be "strength" (representing willpower) or whatever makes sense.
 - The title should frame it as a challenge (e.g., "Resist the urge to smoke", "Digital Detox Challenge").
 - The description should be motivating and confirm it is an avoidance goal.
+
+CONTEXT AWARENESS:
+The user already has the following active habits: ${active_habits ? active_habits.map((h: any) => \`${h.title} (${h.frequency})\`).join(", ") : "None"}.
+If their custom prompt is too similar to an existing habit, you should still allow it but perhaps make the title distinct or ensure the stats complement it.
 
 Return EXACTLY ONE JSON object with no markdown formatting. It must match this exact structure:
 {

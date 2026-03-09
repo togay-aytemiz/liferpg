@@ -43,15 +43,31 @@ You MUST return valid JSON with this exact structure:
     "xp_reward": number (80-150),
     "stat_affected": "...",
     "stat_points": number (3-5)
-  }
+  },
+  "chain_quests": [
+    {
+      "title": "Follow-up step title",
+      "description": "...",
+      "quest_type": "boss",
+      "difficulty": "hard" | "epic",
+      "xp_reward": number (60-120),
+      "stat_affected": "...",
+      "stat_points": number (2-4)
+    }
+  ]
 }
 
 Rules:
 - Generate 4-6 daily quests, 2-3 side quests, 1 boss quest
+- Generate 2-3 chain_quests that form a QUEST CHAIN with the boss quest:
+  - Each chain quest is a progressively harder continuation of the boss quest
+  - Think of it as chapters in a story: Step 1 (boss_quest) → Step 2 → Step 3 → Step 4
+  - Chain quests start LOCKED (inactive) and unlock as the user completes each step
 - If the user has completed quests before, make new quests slightly more challenging or varied
 - If the user has SKIPPED/DISLIKED certain quests, do NOT generate similar ones
 - Match activities to stats: exercise→strength, reading→knowledge, work→wealth, travel→adventure, social→social
-- Keep titles concise and RPG-themed`;
+- Keep titles concise and RPG-themed
+- IMPORTANT CONTEXT AVOIDANCE: If the user provides 'active_habits', DO NOT generate Daily or Side quests that perfectly match these existing habits. Generate complementary or entirely new quests instead.`;
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -76,7 +92,7 @@ serve(async (req) => {
             );
         }
 
-        const { life_rhythm } = await req.json();
+        const { life_rhythm, active_habits } = await req.json();
         if (!life_rhythm || typeof life_rhythm !== "string") {
             return new Response(
                 JSON.stringify({ error: "life_rhythm is required" }),
@@ -139,13 +155,17 @@ serve(async (req) => {
         const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
         const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
 
+        const habitsContext = active_habits && active_habits.length > 0
+            ? `\n\nI ALREADY HAVE THESE HABITS (Do NOT give me quests for these): ${active_habits.map((h: any) => `${h.title} (${h.frequency})`).join(", ")}`
+            : "";
+
         // 4. Call OpenAI
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
                 {
                     role: "user",
-                    content: `Here is my updated daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${historyContext}${skipContext}\n\nPlease generate quests highly tailored to my routine, my focus areas, and my likes. Strictly AVOID what I hate! Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).`,
+                    content: `Here is my updated daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${historyContext}${skipContext}${habitsContext}\n\nPlease generate quests highly tailored to my routine, my focus areas, and my likes. Strictly AVOID what I hate! Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).`,
                 },
             ],
             {
@@ -157,6 +177,11 @@ serve(async (req) => {
         );
 
         const generatedQuests = validateQuestResponse(aiResponse);
+
+        // Generate a chain_id for boss + chain quests
+        const chainId = crypto.randomUUID();
+        const chainQuests = (generatedQuests as any).chain_quests || [];
+        const chainTotal = 1 + chainQuests.length; // boss = step 1
 
         // 5. Insert new quests — explicit field mapping, no raw AI spread
         const allQuests = [
@@ -186,6 +211,7 @@ serve(async (req) => {
                 is_active: true,
                 gold_reward: 0,
             })),
+            // Boss quest = chain step 1 (active)
             {
                 title: generatedQuests.boss_quest.title,
                 description: generatedQuests.boss_quest.description,
@@ -198,7 +224,27 @@ serve(async (req) => {
                 is_ai_generated: true,
                 is_active: true,
                 gold_reward: 5,
+                chain_id: chainTotal > 1 ? chainId : null,
+                chain_step: chainTotal > 1 ? 1 : null,
+                chain_total: chainTotal > 1 ? chainTotal : null,
             },
+            // Chain follow-up quests (step 2, 3, ... — start LOCKED)
+            ...chainQuests.map((q: any, i: number) => ({
+                title: q.title || `Chain Step ${i + 2}`,
+                description: q.description || '',
+                quest_type: 'boss',
+                difficulty: q.difficulty || 'hard',
+                xp_reward: Number(q.xp_reward) || 80,
+                stat_affected: q.stat_affected || generatedQuests.boss_quest.stat_affected,
+                stat_points: Number(q.stat_points) || 3,
+                user_id: user.id,
+                is_ai_generated: true,
+                is_active: false, //  LOCKED until previous step completed
+                gold_reward: 5 + (i + 1) * 2,
+                chain_id: chainId,
+                chain_step: i + 2,
+                chain_total: chainTotal,
+            })),
         ];
 
         const { data: insertedQuests, error: insertError } = await supabase
@@ -221,6 +267,7 @@ serve(async (req) => {
                     daily: generatedQuests.daily_quests.length,
                     side: generatedQuests.side_quests.length,
                     boss: 1,
+                    chain: chainQuests.length,
                 },
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

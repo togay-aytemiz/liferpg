@@ -50,13 +50,30 @@ You MUST return valid JSON with this exact structure:
     "xp_reward": number (80-150),
     "stat_affected": "...",
     "stat_points": number (3-5)
-  }
+  },
+  "chain_quests": [
+    {
+      "title": "Follow-up step title (natural continuation of boss quest)",
+      "description": "...",
+      "quest_type": "boss",
+      "difficulty": "hard" | "epic",
+      "xp_reward": number (60-120),
+      "stat_affected": "...",
+      "stat_points": number (2-4)
+    }
+  ]
 }
 
 Rules:
 - Generate 4-6 daily quests based on the user's routine
 - Generate 2-3 fun side quests for variety
 - Generate 1 boss quest as a weekly challenge
+- Generate 2-3 chain_quests that form a QUEST CHAIN with the boss quest:
+  - Each chain quest is a progressively harder continuation of the boss quest
+  - Think of it as chapters in a story: Step 1 (boss_quest) → Step 2 → Step 3 → Step 4
+  - Each step should escalate in difficulty and ambition
+  - Example: "Run 2km" → "Run 5km" → "Run 10km race"
+  - Chain quests start LOCKED (inactive) and unlock as the user completes each step
 - Match activities to the correct stat category:
   - Exercise/fitness → strength
   - Reading/learning/studying → knowledge
@@ -66,7 +83,8 @@ Rules:
 - Make quests specific to what the user described, not generic
 - Quest titles should be concise and action-oriented (like RPG quest names)
 - XP rewards should match difficulty
-- Keep the tone motivating and RPG-themed`;
+- Keep the tone motivating and RPG-themed
+- IMPORTANT CONTEXT AVOIDANCE: If the user provides 'active_habits', DO NOT generate Daily or Side quests that perfectly match these existing habits. Generate complementary or entirely new quests instead.`;
 
 serve(async (req) => {
     // Handle CORS preflight
@@ -132,6 +150,11 @@ serve(async (req) => {
         // Parse and VALIDATE the AI-generated quests (whitelists fields)
         const generatedQuests = validateQuestResponse(aiResponse);
 
+        // Generate a chain_id for boss + chain quests
+        const chainId = crypto.randomUUID();
+        const chainQuests = (generatedQuests as any).chain_quests || [];
+        const chainTotal = 1 + chainQuests.length; // boss = step 1
+
         // Prepare quests for database insertion — only known columns
         const allQuests = [
             ...generatedQuests.daily_quests.map(q => ({
@@ -160,6 +183,7 @@ serve(async (req) => {
                 is_active: true,
                 gold_reward: 0,
             })),
+            // Boss quest = chain step 1 (active)
             {
                 title: generatedQuests.boss_quest.title,
                 description: generatedQuests.boss_quest.description,
@@ -172,7 +196,27 @@ serve(async (req) => {
                 is_ai_generated: true,
                 is_active: true,
                 gold_reward: 5,
+                chain_id: chainTotal > 1 ? chainId : null,
+                chain_step: chainTotal > 1 ? 1 : null,
+                chain_total: chainTotal > 1 ? chainTotal : null,
             },
+            // Chain follow-up quests (step 2, 3, ... — start LOCKED)
+            ...chainQuests.map((q: any, i: number) => ({
+                title: q.title || `Chain Step ${i + 2}`,
+                description: q.description || '',
+                quest_type: 'boss',
+                difficulty: q.difficulty || 'hard',
+                xp_reward: Number(q.xp_reward) || 80,
+                stat_affected: q.stat_affected || generatedQuests.boss_quest.stat_affected,
+                stat_points: Number(q.stat_points) || 3,
+                user_id: user.id,
+                is_ai_generated: true,
+                is_active: false, //  LOCKED until previous step completed
+                gold_reward: 5 + (i + 1) * 2,
+                chain_id: chainId,
+                chain_step: i + 2,
+                chain_total: chainTotal,
+            })),
         ];
 
         // Insert quests into database
@@ -204,6 +248,7 @@ serve(async (req) => {
                     daily: generatedQuests.daily_quests.length,
                     side: generatedQuests.side_quests.length,
                     boss: 1,
+                    chain: chainQuests.length,
                 },
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -33,13 +33,48 @@ This document tracks the structured phases of development for the lifeRPG projec
 
 ---
 
+## Phase 5: Advanced Systems ✅
+- [x] **HP & Death Penalty:** Health Points system — skip quests to lose HP, die to lose gold & streak.
+- [x] **Streak Freezes:** Purchasable items that protect overnight HP/streak loss.
+- [x] **Custom Quests & Avoidance Goals:** User-prompted AI quest creation + "quit smoking" style avoidance goals.
+- [x] **Quest Skip System:** Skip with reason → HP loss → LLM-aware replacement quest.
+- [x] **Personalization (Likes/Dislikes/Focus):** Free-text user preferences injected into all LLM prompts.
+
+## Phase 6: Habits & Context-Aware AI ✅
+- [x] **Habit Tracking System:** Good/Bad habits with daily XP drip, stat boosts, and logging.
+- [x] **Habit Frequencies:** Daily, Weekly, Monthly habits with UI selector.
+- [x] **Quest → Habit Conversion:** One-click convert any quest into a recurring habit.
+- [x] **LLM Context Awareness:** All Edge Functions receive active habits to avoid duplicate quest generation.
+
+## Phase 7: Dynamic Economy ✅
+- [x] **Static Shop (Magical Goods):** Health Potions, XP Scrolls, Streak Freezes available permanently.
+- [x] **Dynamic AI Shop (The Bazaar):** LLM generates personalized real-life rewards (4 items, 8 categories, 7-day rotation).
+- [x] **Category-Based Visuals:** Each dynamic item mapped to a visual category (food, entertainment, self-care, learning, gear, experience, digital, social).
+- [x] **Auto-Restock:** Shop automatically regenerates when items expire.
+
+## Phase 8: Infinite Progression & Achievement Expansion ✅
+- [x] **Formula-Based Infinite Levels:** Replaced hardcoded Level 1-15 table with `100 × level^1.8` formula. No level cap.
+- [x] **Stat Diminishing Returns:** Stats use soft-cap formula `10 / (10 + current)` — fast growth early, asymptotic later.
+- [x] **Achievement Catalog Expanded (13 → 34):** New badges for Level 25/50/100, 500/1000 quests, 90/365-day streaks, habit milestones, gold accumulation, and shop purchases.
+- [x] **New Achievement Condition Types:** `habit_count`, `gold_reached`, `shop_purchase` added to auto-unlock engine.
+
+---
+
+## Phase 9: Narrative & Progression Depth ✅
+- [x] **Quest Chains:** Multi-step connected quests (2-4 steps) that tell a narrative.
+- [x] **Sequential Unlocking:** Chain steps are locked and "ghosted" until the previous step is completed.
+- [x] **Unlock Notifications:** Frontend triggers specific toasts when the next link in a chain is forged.
+- [x] **LLM Chain Generation:** `generate-quests` and `regenerate-quests` now produce narrative-linked follow-ups for boss quests.
+
+---
+
 ## Post-MVP (Future Features)
-- [x] HP (Health Points) system and death penalties (loss of streak and gold)
-- [ ] Habit Tracking System (Continuous/repeatable actions distinct from 1-off quests)
-- [ ] Shop & Economy (Spend gold on potions, cosmetics, streak restoration)
-- [ ] Guild system (friends / accountability groups)
-- [ ] PvP challenges (step competitions, productivity battles)
-- [ ] Leaderboards
-- [x] AI quest generation (AI suggests daily quests)
-- [ ] Loot system (random reward drops)
-- [ ] Character cosmetics
+- [ ] **Character Class System:** Auto-assign class (Warrior, Scholar, etc.) based on highest stat
+- [ ] **Boss Loot Drops:** Random bonus rewards from boss quest completions
+- [ ] **Weekly AI Review:** LLM-generated summary of weekly progress
+- [ ] **Random Events:** Surprise micro-quests that appear with a % chance
+- [ ] **Character Cosmetics:** Unlockable avatars, UI themes, profile frames
+- [ ] **Guild System:** Friends / accountability groups
+- [ ] **PvP Challenges:** Step competitions, productivity battles
+- [ ] **Leaderboards:** Weekly/Monthly rankings
+- [ ] **Push Notifications:** Daily quest reminders

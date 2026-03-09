@@ -89,6 +89,11 @@ Tasks are converted into quests.
 - *Examples:* finish project, presentation, run 10k, publish article
 - *Reward:* Large XP, Achievement badge
 
+**Quest Chains** (Multi-step narrative quests)
+- *Logic:* Completing a Boss Quest (Step 1) unlocks a sequence of 2-4 connected tasks.
+- *Visuals:* Chain steps are "ghosted" (locked) until the previous link is completed.
+- *Narrative:* Designed by AI to tell a story or breakdown a large goal into manageable phases.
+
 ### 4.3 XP and Level System
 Completing quests gives XP.
 
@@ -99,12 +104,14 @@ Completing quests gives XP.
 - Daily quest → 15 XP
 - Boss quest → 100 XP
 
-**Level progression example:**
-- Level 1 → 0 XP
+**Infinite Level Progression:**
+Levels are calculated with a scaling formula: `xp_required(level) = 100 × level^1.8`
 - Level 2 → 100 XP
-- Level 3 → 250 XP
-- Level 4 → 500 XP
-- Level 5 → 900 XP
+- Level 10 → 6,300 XP
+- Level 50 → 120,000 XP
+- Level 100 → 400,000 XP
+
+There is **no level cap** — the system supports infinite progression like idle RPGs.
 
 **Level ups unlock:**
 - Achievements
@@ -112,7 +119,9 @@ Completing quests gives XP.
 - Cosmetic upgrades
 
 ### 4.4 Character Stat Progression
-Actions increase stats.
+Actions increase stats with **diminishing returns**: `effective_gain = raw × (10 / (10 + current_stat))`
+
+Stats grow fast early but slow down as they increase, creating meaningful progression without absurd numbers.
 
 *Example:*
 - Workout → Strength
@@ -124,16 +133,19 @@ Actions increase stats.
 Stats visually grow with RPG stat bars.
 
 ### 4.5 Achievement System
-Users unlock collectible achievements.
+Users unlock collectible achievements **automatically** when conditions are met.
 
-*Examples:*
-- First Quest Completed
-- 7 Day Streak
-- 50 Quests Completed
-- Level 10 Reached
-- First Boss Defeated
+**Achievement categories (34 total):**
+- **Quest milestones:** First Quest, 5, 50, 100, 500, 1000 quests
+- **Streak milestones:** 3, 7, 14, 30, 90, 100, 365 day streaks
+- **Level milestones:** Level 5, 10, 15, 25, 50, 100
+- **Boss milestones:** First boss, 10, 25, 50 bosses defeated
+- **Habit milestones:** First habit, 5, 10 habits created
+- **Gold milestones:** 100, 1K, 10K, 100K gold accumulated
+- **Shop milestones:** First purchase, 10 purchases
 
-Achievements appear as badges or medals.
+Rarities: Common, Uncommon, Rare, Epic, Legendary.
+Achievements appear as badges with rarity-coded colors and a 🏆 toast notification on unlock.
 
 ### 4.6 Streak System
 Track daily consistency.
@@ -159,14 +171,31 @@ Users define real-life rewards.
 ### 4.8 Habit Tracking System (Continuous Tasks)
 Separate from quests, users can define *Habits* that remain active day-to-day.
 - **Good habits:** (e.g., Drink water, Meditate) - Grants drip-feed XP every time it's clicked.
-- **Bad habits:** (e.g., Avoid sugar) - Visualized as standing strength, testing willpower over time.
+- **Bad habits:** (e.g., Avoid sugar, Limit screen time) - Visualized as standing strength, testing willpower over time.
+- **Frequencies:** Habits can be Daily, Weekly, or Monthly — each with its own tracking cadence.
+- **Quest → Habit Conversion:** Any AI-generated quest can be converted into a permanent habit with one click.
+- **LLM Context:** Active habits are injected into all AI prompts so the system never generates redundant quests.
 
 ### 4.9 Shop & Economy System
-Gold is earned through quests and boss battles. It can be spent in the virtual Shop.
-- **Cosmetics:** Unlock new profile avatars or UI themes.
-- **Boost Potions:** Buy a 2-hour XP multiplier (+20% XP) before a deep work session.
-- **Savior Items:** Pay a high gold cost to restore a lost daily streak.
-*Purpose:* Give the virtual economy weight so the "Death Penalty" (losing gold) feels impactful.
+Gold is earned through quests and boss battles. It can be spent in the Shop ("The Bazaar").
+
+**Static Magical Goods (always available):**
+- **Health Potion:** Restore 50 HP instantly (100 gold).
+- **Scroll of Experience:** +250 XP boost (300 gold).
+- **Streak Freeze:** Protect one missed day from HP/streak loss (500 gold, max 3).
+
+**Dynamic AI-Generated Offers (rotating):**
+- LLM generates 4 personalized real-life rewards based on user's life rhythm and preferences.
+- Each item is categorized into one of 8 visual categories: Food/Drink, Entertainment, Self-Care, Learning, Gear, Experience, Digital, Social.
+- Items expire after 7 days; shop auto-restocks with fresh AI-generated items.
+- Cost ranges from 100 to 1500 gold.
+
+*Purpose:* Give the virtual economy weight so the "Death Penalty" (losing gold) feels impactful, while the dynamic offers provide tangible real-life motivation.
+
+### 4.10 Custom Quests & Avoidance Goals
+Users can create custom AI-evaluated quests via free-text prompt.
+- **Custom Quests:** User describes what they want to do; AI evaluates difficulty, XP, and stat mapping.
+- **Avoidance Goals:** Negative-framed quests (e.g., "Don't smoke today", "Spend less than 2 hours on Instagram") that test willpower.
 
 ---
 
@@ -277,13 +306,13 @@ The core user loop:
 - Settings (Ability to edit Life Rhythm and regenerate quests)
 
 ### Future Features (Post-MVP)
-- Habit tracking system (drip-feed XP, continuous tasks vs daily quests)
-- Shop & Economy (spend gold on potions, cosmetics, streak restores)
+- Loot system (random reward drops from boss fights)
+- Character cosmetics (unlockable avatars, UI themes)
 - Guild system (friends / accountability groups)
 - PvP challenges (step competitions, productivity battles)
 - Leaderboards
-- Loot system (random reward drops from boss fights)
-- Character cosmetics
+- Push notifications & daily reminders
+- Weekly AI-generated progress review
 
 ---
 

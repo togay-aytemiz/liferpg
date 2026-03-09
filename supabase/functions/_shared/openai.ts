@@ -163,6 +163,27 @@ export function validateRewardResponse(raw: string): { rewards: RewardData[] } {
     };
 }
 
+/**
+ * Safely parse and validate the AI-generated shop items JSON.
+ */
+export function validateShopResponse(raw: string): { items: ShopItemData[] } {
+    let parsed: Record<string, unknown>;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        throw new Error(`AI returned invalid JSON for shop items: ${raw.substring(0, 200)}`);
+    }
+
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
+    if (items.length === 0) {
+        throw new Error("AI returned no shop items.");
+    }
+
+    return {
+        items: items.map(sanitizeShopItem),
+    };
+}
+
 // ============================================================
 // Types & Sanitization helpers
 // ============================================================
@@ -183,9 +204,17 @@ interface RewardData {
     unlock_level: number;
 }
 
+interface ShopItemData {
+    title: string;
+    description: string;
+    cost: number;
+    category: string;
+}
+
 const VALID_QUEST_TYPES = new Set(["daily", "side", "boss"]);
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
 const VALID_STATS = new Set(["strength", "knowledge", "wealth", "adventure", "social"]);
+const VALID_SHOP_CATEGORIES = new Set(["food_drink", "entertainment", "self_care", "learning", "gear", "experience", "digital", "social"]);
 
 /**
  * Whitelist only known quest fields — never spread raw AI output into DB.
@@ -211,6 +240,17 @@ function sanitizeReward(r: Record<string, unknown>): RewardData {
         title: typeof r.title === "string" ? r.title.substring(0, 200) : "Mystery Reward",
         description: typeof r.description === "string" ? r.description.substring(0, 500) : "",
         unlock_level: clamp(Number(r.unlock_level) || 5, 1, 50),
+    };
+}
+
+function sanitizeShopItem(i: Record<string, unknown>): ShopItemData {
+    const category = VALID_SHOP_CATEGORIES.has(String(i.category)) ? String(i.category) : "entertainment";
+
+    return {
+        title: typeof i.title === "string" ? i.title.substring(0, 200) : "Mystery Item",
+        description: typeof i.description === "string" ? i.description.substring(0, 500) : "",
+        cost: clamp(Number(i.cost) || 100, 50, 2000),
+        category: category,
     };
 }
 

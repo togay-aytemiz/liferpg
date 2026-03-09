@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Quest } from '../lib/database.types';
-import { completeQuest, skipQuest, createCustomQuest } from '../lib/api';
-import { ArrowLeft, Check, Swords, Shield, Skull, X, Plus } from 'lucide-react';
+import { completeQuest, skipQuest, createCustomQuest, convertToHabit } from '../lib/api';
+import { ArrowLeft, Check, Swords, Shield, Skull, X, Plus, Repeat } from 'lucide-react';
 import BottomNav from '../components/BottomNav';
 
 export default function Quests() {
@@ -34,8 +34,9 @@ export default function Quests() {
             .from('quests')
             .select('*')
             .eq('user_id', user.id)
-            .eq('is_active', true)
-            .order('created_at');
+            .or('is_active.eq.true,chain_id.not.is.null')
+            .order('chain_step', { ascending: true }) // Sort by step order
+            .order('created_at', { ascending: true });
         if (data) setQuests(data as Quest[]);
 
         const today = new Date().toISOString().split('T')[0];
@@ -57,7 +58,13 @@ export default function Quests() {
             const result = await completeQuest(questId);
             setCompletedIds(prev => new Set([...prev, questId]));
             await refreshProfile();
-            showToast(`+${result.xp_awarded} XP earned!`);
+
+            if (result.chain_unlocked) {
+                showToast(`Quest Completed! Next Step Unlocked: ${result.chain_unlocked}`);
+            } else {
+                showToast(`+${result.xp_awarded} XP earned!`);
+            }
+            await fetchQuests(); // Re-fetch to see the newly unlocked step if any
         } catch (err) {
             console.error(err);
             showToast('Failed to complete quest', 'error');
@@ -129,11 +136,96 @@ export default function Quests() {
         setIsCreatingCustom(false);
     };
 
+    const handleMakeHabit = async (questTitle: string, statAffected?: string | null) => {
+        try {
+            await convertToHabit(questTitle, statAffected);
+            setToast({ msg: `"${questTitle}" added to Good Habits!`, type: 'success' });
+            setTimeout(() => setToast(null), 3000);
+        } catch (err: any) {
+            setToast({ msg: err.message || "Failed to create habit", type: 'error' });
+            setTimeout(() => setToast(null), 3000);
+        }
+    };
+
     const filtered = quests.filter(q => q.quest_type === tab);
 
     const diffColors: Record<string, string> = {
         easy: 'text-emerald-400', medium: 'text-amber-400', hard: 'text-red-400', epic: 'text-purple-400',
     };
+
+    function renderQuestCard(q: Quest) {
+        const done = completedIds.has(q.id);
+        const isLoading = loadingId === q.id;
+        const isSkipping = skippingId === q.id;
+        const isLocked = !q.is_active && !done;
+
+        return (
+            <div
+                key={q.id}
+                className={`bg-slate-800 border rounded-lg p-4 flex items-start gap-3 shadow-hud transition-all 
+                    ${done ? 'border-emerald-800/50 opacity-60' : q.quest_type === 'boss' ? 'border-red-900/40' : 'border-slate-700'}
+                    ${isLocked ? 'grayscale border-dashed border-slate-800 opacity-40' : ''}
+                `}
+            >
+                <button
+                    onClick={() => handleComplete(q.id)}
+                    disabled={done || isLocked || !!loadingId || !!skippingId}
+                    className={`w-7 h-7 rounded mt-0.5 border-2 flex items-center justify-center shrink-0 transition-all 
+                        ${done ? 'bg-emerald-500 border-emerald-500' : isLocked ? 'bg-slate-900 border-slate-800 cursor-not-allowed' : 'bg-slate-900 border-slate-600 hover:border-amber-500'}
+                    `}
+                >
+                    {isLoading ? (
+                        <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                    ) : done ? (
+                        <Check className="w-4 h-4 text-white" />
+                    ) : isLocked ? (
+                        <Skull className="w-4 h-4 text-slate-700" />
+                    ) : null}
+                </button>
+                <div className="flex-1">
+                    <div className="flex justify-between items-start gap-2">
+                        <p className={`font-medium text-sm ${done ? 'line-through text-slate-500' : isLocked ? 'text-slate-500' : 'text-white'}`}>
+                            {q.title}
+                        </p>
+                        {q.chain_step && (
+                            <span className="text-[10px] font-mono font-bold bg-slate-900/50 px-1.5 py-0.5 rounded border border-slate-700/50 text-slate-500">
+                                {q.chain_step}/{q.chain_total}
+                            </span>
+                        )}
+                    </div>
+                    {q.description && <p className="text-xs text-slate-500 mt-1">{q.description}</p>}
+                    <div className="flex items-center gap-3 mt-2">
+                        <span className="text-amber-500 text-xs font-mono">+{q.xp_reward} XP</span>
+                        <span className={`text-xs ${diffColors[q.difficulty] || 'text-slate-400'}`}>{q.difficulty}</span>
+                        {q.stat_affected && <span className="text-xs text-slate-500 capitalize">{q.stat_affected}</span>}
+                    </div>
+                </div>
+                {!done && !isLocked && (
+                    <div className="flex flex-col gap-1 mt-0.5 shrink-0">
+                        <button
+                            onClick={() => handleMakeHabit(q.title, q.stat_affected)}
+                            title="Make this a daily habit"
+                            className="text-slate-600 hover:text-emerald-400 transition-colors p-1"
+                        >
+                            <Repeat className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={() => handleSkipClick(q.id, q.title)}
+                            disabled={!!loadingId || !!skippingId}
+                            title="Skip this quest"
+                            className="text-slate-600 hover:text-red-400 transition-colors p-1"
+                        >
+                            {isSkipping ? (
+                                <div className="w-4 h-4 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                                <X className="w-4 h-4" />
+                            )}
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div className="flex-1 flex flex-col animate-in fade-in duration-500">
@@ -186,58 +278,36 @@ export default function Quests() {
             )}
 
             {/* Quest List */}
-            <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-2.5">
+            <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-4">
                 {filtered.length === 0 && (
                     <p className="text-slate-500 text-sm text-center py-8">No {tab} quests found.</p>
                 )}
-                {filtered.map(q => {
-                    const done = completedIds.has(q.id);
-                    const isLoading = loadingId === q.id;
-                    const isSkipping = skippingId === q.id;
-                    return (
-                        <div key={q.id} className={`bg-slate-800 border rounded-lg p-4 flex items-start gap-3 shadow-hud transition-all ${done ? 'border-emerald-800/50 opacity-60' : q.quest_type === 'boss' ? 'border-red-900/60' : 'border-slate-700'
-                            }`}>
-                            <button
-                                onClick={() => handleComplete(q.id)}
-                                disabled={done || !!loadingId || !!skippingId}
-                                className={`w-7 h-7 rounded mt-0.5 border-2 flex items-center justify-center shrink-0 transition-all ${done ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-900 border-slate-600 hover:border-amber-500'
-                                    }`}
-                            >
-                                {isLoading ? (
-                                    <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-                                ) : done ? (
-                                    <Check className="w-4 h-4 text-white" />
-                                ) : null}
-                            </button>
-                            <div className="flex-1">
-                                <p className={`font-medium text-sm ${done ? 'line-through text-slate-500' : 'text-white'}`}>
-                                    {q.title}
-                                </p>
-                                {q.description && <p className="text-xs text-slate-500 mt-1">{q.description}</p>}
-                                <div className="flex items-center gap-3 mt-2">
-                                    <span className="text-amber-500 text-xs font-mono">+{q.xp_reward} XP</span>
-                                    <span className={`text-xs ${diffColors[q.difficulty] || 'text-slate-400'}`}>{q.difficulty}</span>
-                                    {q.stat_affected && <span className="text-xs text-slate-500 capitalize">{q.stat_affected}</span>}
+
+                {(() => {
+                    const renderedChains = new Set<string>();
+                    return filtered.map(q => {
+                        if (q.chain_id && !renderedChains.has(q.chain_id)) {
+                            renderedChains.add(q.chain_id);
+                            const chainQuests = filtered.filter(cq => cq.chain_id === q.chain_id);
+                            return (
+                                <div key={q.chain_id} className="space-y-2">
+                                    <div className="flex items-center gap-2 px-1">
+                                        <div className="h-px flex-1 bg-slate-800" />
+                                        <span className="text-[10px] font-heading font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                                            <Skull className="w-3 h-3 text-slate-600" /> Quest Chain
+                                        </span>
+                                        <div className="h-px flex-1 bg-slate-800" />
+                                    </div>
+                                    <div className="space-y-2.5">
+                                        {chainQuests.map(cq => renderQuestCard(cq))}
+                                    </div>
                                 </div>
-                            </div>
-                            {/* Skip/Dislike button */}
-                            {!done && (
-                                <button
-                                    onClick={() => handleSkipClick(q.id, q.title)}
-                                    disabled={!!loadingId || !!skippingId}
-                                    title="Skip this quest"
-                                    className="text-slate-600 hover:text-red-400 transition-colors p-1 mt-0.5 shrink-0"
-                                >
-                                    {isSkipping ? (
-                                        <div className="w-4 h-4 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-                                    ) : (
-                                        <X className="w-4 h-4" />
-                                    )}
-                                </button>
-                            )}
-                        </div>
-                    );
-                })}
+                            );
+                        }
+                        if (!q.chain_id) return renderQuestCard(q);
+                        return null;
+                    });
+                })()}
             </div>
 
             {/* Skip Modal */}

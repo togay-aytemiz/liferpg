@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logHabit } from '../lib/api';
 import type { Habit } from '../lib/database.types';
-import { Plus, Minus, ArrowUp, ArrowDown, Activity } from 'lucide-react';
+import { Plus, Minus, ArrowUp, ArrowDown, Activity, X } from 'lucide-react';
 
 export default function Habits() {
     const { user } = useAuth();
@@ -16,6 +16,7 @@ export default function Habits() {
     const [title, setTitle] = useState('');
     const [isGood, setIsGood] = useState(true);
     const [stat, setStat] = useState<string>('strength');
+    const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly'>('daily');
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
@@ -50,6 +51,7 @@ export default function Habits() {
                 title: title.trim(),
                 is_good: isGood,
                 stat_affected: stat,
+                frequency: frequency,
             } as any)
             .select()
             .single();
@@ -121,16 +123,23 @@ export default function Habits() {
             ) : (
                 <div className="grid grid-cols-1 gap-2">
                     {habits.map(h => (
-                        <div key={h.id} className="bg-slate-800 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+                        <div key={h.id} className="bg-slate-800/80 border border-slate-700/80 rounded-lg p-3 flex flex-col gap-2 hover:bg-slate-800 hover:border-slate-600 transition-colors group">
                             <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium text-white">{h.title}</span>
-                                <button onClick={() => handleDeleteHabit(h.id)} className="text-[10px] text-slate-600 hover:text-red-400 font-heading uppercase">Hide</button>
+                                <span className="text-sm font-medium text-white group-hover:text-amber-500 transition-colors">{h.title}</span>
+                                <button onClick={() => handleDeleteHabit(h.id)} className="text-slate-600 hover:text-red-400 transition-colors" title="Hide Habit">
+                                    <X className="w-4 h-4" />
+                                </button>
                             </div>
                             <div className="flex items-center justify-between">
                                 <span className={`text-xs capitalize font-heading flex items-center gap-1 ${h.is_good ? 'text-emerald-500' : 'text-red-500'}`}>
                                     {h.is_good ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
                                     {h.stat_affected}
                                 </span>
+                                <span className="text-xs text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 ml-2">
+                                    {h.frequency}
+                                </span>
+
+                                <div className="flex-1"></div>
 
                                 <button
                                     onClick={() => handleLogHabit(h)}
@@ -184,6 +193,19 @@ export default function Habits() {
                                 >
                                     Bad Habit
                                 </button>
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-400 ml-1 mb-1 block">Frequency</label>
+                                <select
+                                    value={frequency}
+                                    onChange={e => setFrequency(e.target.value as any)}
+                                    className="w-full bg-slate-800 border border-slate-700 px-3 py-2 rounded-lg text-sm text-white focus:outline-none focus:border-amber-500 appearance-none"
+                                >
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="monthly">Monthly</option>
+                                </select>
                             </div>
 
                             <div>

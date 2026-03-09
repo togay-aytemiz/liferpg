@@ -58,6 +58,9 @@ export interface Quest {
     is_active: boolean;
     is_ai_generated: boolean;
     is_custom: boolean;
+    chain_id: string | null;
+    chain_step: number | null;
+    chain_total: number | null;
     created_at: string;
     updated_at: string;
 }
@@ -120,6 +123,7 @@ export interface Habit {
     title: string;
     is_good: boolean;
     stat_affected: StatCategory;
+    frequency: 'daily' | 'weekly' | 'monthly';
     is_active: boolean;
     created_at: string;
 }
@@ -128,6 +132,20 @@ export interface HabitLog {
     id: string;
     user_id: string;
     habit_id: string;
+    created_at: string;
+}
+
+export type ShopCategory = 'food_drink' | 'entertainment' | 'self_care' | 'learning' | 'gear' | 'experience' | 'digital' | 'social';
+
+export interface ShopItem {
+    id: string;
+    user_id: string;
+    title: string;
+    description: string;
+    cost: number;
+    category: ShopCategory;
+    expires_at: string;
+    is_purchased: boolean;
     created_at: string;
 }
 
@@ -186,12 +204,18 @@ export interface Database {
                 Insert: Partial<HabitLog>;
                 Update: Partial<HabitLog>;
             };
+            shop_items: {
+                Row: ShopItem;
+                Insert: Partial<ShopItem>;
+                Update: Partial<ShopItem>;
+            };
         };
         Enums: {
             quest_type: QuestType;
             quest_difficulty: QuestDifficulty;
             stat_category: StatCategory;
             achievement_rarity: AchievementRarity;
+            shop_category: ShopCategory;
         };
     };
 }

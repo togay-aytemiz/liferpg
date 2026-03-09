@@ -2,9 +2,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { completeQuest, type CompleteQuestResponse } from '../lib/api';
-import type { Quest, Streak, LevelThreshold, Reward } from '../lib/database.types';
-import { Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Heart, Plus } from 'lucide-react';
+import { completeQuest, convertToHabit, type CompleteQuestResponse } from '../lib/api';
+import type { Quest, Streak, Reward } from '../lib/database.types';
+import { Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Heart, Plus, Repeat } from 'lucide-react';
 import BottomNav from '../components/BottomNav';
 import Habits from '../components/Habits';
 
@@ -23,10 +23,11 @@ function StatBar({ label, value, max = 100, color }: { label: string; value: num
 }
 
 // Quest card component
-function QuestCard({ quest, isCompleted, onComplete }: {
+function QuestCard({ quest, isCompleted, onComplete, onMakeHabit }: {
     quest: Quest;
     isCompleted: boolean;
     onComplete: (id: string) => void;
+    onMakeHabit?: (quest: Quest) => void;
 }) {
     const [loading, setLoading] = useState(false);
 
@@ -67,6 +68,11 @@ function QuestCard({ quest, isCompleted, onComplete }: {
                         {quest.title}
                     </p>
                     {quest.quest_type === 'boss' && <span className="text-xs">⚔️</span>}
+                    {quest.chain_step && (
+                        <span className="text-[10px] font-mono font-bold bg-slate-900/50 px-1.5 py-0.5 rounded border border-slate-700/50 text-slate-500 ml-1">
+                            {quest.chain_step}/{quest.chain_total}
+                        </span>
+                    )}
                 </div>
                 {quest.description && (
                     <p className="text-xs text-slate-500 mt-0.5 truncate">{quest.description}</p>
@@ -81,6 +87,16 @@ function QuestCard({ quest, isCompleted, onComplete }: {
                     )}
                 </div>
             </div>
+            {/* Actions Container */}
+            {!isCompleted && onMakeHabit && (
+                <button
+                    onClick={() => onMakeHabit(quest)}
+                    title="Make this a daily habit"
+                    className="text-slate-600 hover:text-emerald-400 transition-colors p-1 mt-0.5 shrink-0"
+                >
+                    <Repeat className="w-4 h-4" />
+                </button>
+            )}
         </div>
     );
 }
@@ -94,6 +110,7 @@ export default function Dashboard() {
     const [nextLevelXP, setNextLevelXP] = useState(100);
     const [levelUpToast, setLevelUpToast] = useState('');
     const [achievementToast, setAchievementToast] = useState('');
+    const [actionToast, setActionToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
     const [rewards, setRewards] = useState<Reward[]>([]);
 
     // Fetch data on mount
@@ -132,15 +149,10 @@ export default function Dashboard() {
 
         if (streakData) setStreak(streakData as Streak);
 
-        // Fetch next level XP target
+        // Compute next level XP target using formula (replaces level_thresholds table)
         const currentLevel = profile?.level ?? 1;
-        const { data: nextThreshold } = await supabase
-            .from('level_thresholds')
-            .select('xp_required')
-            .eq('level', currentLevel + 1)
-            .single();
-
-        if (nextThreshold) setNextLevelXP((nextThreshold as LevelThreshold).xp_required);
+        const xpForNextLevel = Math.floor(100 * Math.pow(currentLevel + 1, 1.8));
+        setNextLevelXP(xpForNextLevel);
 
         // Fetch rewards
         const { data: rewardData } = await supabase
@@ -180,8 +192,25 @@ export default function Dashboard() {
             if (result.streak !== streak?.current_streak) {
                 setStreak(prev => prev ? { ...prev, current_streak: result.streak, xp_multiplier: result.xp_multiplier } : prev);
             }
+
+            // Show chain unlock toast
+            if (result.chain_unlocked) {
+                setActionToast({ msg: `Next Step Unlocked: ${result.chain_unlocked}`, type: 'success' });
+                setTimeout(() => setActionToast(null), 4000);
+            }
         } catch (err) {
             console.error('Quest completion failed:', err);
+        }
+    };
+
+    const handleMakeHabit = async (quest: Quest) => {
+        try {
+            await convertToHabit(quest.title, quest.stat_affected);
+            setActionToast({ msg: `"${quest.title}" added to Habits!`, type: 'success' });
+            setTimeout(() => setActionToast(null), 3000);
+        } catch (error: any) {
+            setActionToast({ msg: error.message || "Failed to make habit", type: 'error' });
+            setTimeout(() => setActionToast(null), 3000);
         }
     };
 
@@ -195,10 +224,10 @@ export default function Dashboard() {
     const sideQuests = quests.filter(q => q.quest_type === 'side');
     const bossQuest = quests.find(q => q.quest_type === 'boss');
 
-    // XP progress calculation
+    // XP progress calculation (formula-based infinite levels)
     const currentXP = profile?.xp ?? 0;
     const currentLevel = profile?.level ?? 1;
-    const prevLevelXP = currentLevel === 1 ? 0 : Math.round(nextLevelXP * 0.6);
+    const prevLevelXP = Math.floor(100 * Math.pow(currentLevel, 1.8));
     const xpInLevel = currentXP - prevLevelXP;
     const xpNeeded = nextLevelXP - prevLevelXP;
     const xpPercent = Math.min((xpInLevel / Math.max(xpNeeded, 1)) * 100, 100);
@@ -217,6 +246,15 @@ export default function Dashboard() {
             {achievementToast && (
                 <div className="absolute top-16 left-4 right-4 z-50 bg-emerald-600 text-white font-heading text-center py-3 px-4 rounded-lg shadow-glow-emerald animate-in slide-in-from-top duration-300 text-sm">
                     {achievementToast}
+                </div>
+            )}
+            {/* Toast: Action */}
+            {actionToast && (
+                <div className={`absolute top-4 left-4 right-4 z-50 px-4 py-3 rounded-lg text-sm text-center shadow-lg animate-in slide-in-from-top-2 duration-200 ${actionToast.type === 'error'
+                    ? 'bg-red-900/90 border border-red-800 text-red-100 shadow-glow-red'
+                    : 'bg-emerald-900/90 border border-emerald-800 text-emerald-100 shadow-glow-emerald'
+                    }`}>
+                    {actionToast.msg}
                 </div>
             )}
 
@@ -301,6 +339,7 @@ export default function Dashboard() {
                                     quest={q}
                                     isCompleted={completedQuestIds.has(q.id)}
                                     onComplete={handleCompleteQuest}
+                                    onMakeHabit={handleMakeHabit}
                                 />
                             ))}
                         </div>
@@ -330,6 +369,7 @@ export default function Dashboard() {
                                     quest={q}
                                     isCompleted={completedQuestIds.has(q.id)}
                                     onComplete={handleCompleteQuest}
+                                    onMakeHabit={handleMakeHabit}
                                 />
                             ))}
                         </div>

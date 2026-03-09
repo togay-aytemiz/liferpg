@@ -117,20 +117,15 @@ serve(async (req) => {
         const newXP = (profile?.xp ?? 0) + awardedXP;
         const newGold = (profile?.gold ?? 0) + awardedGold;
 
-        // Calculate new level from level_thresholds
-        const { data: thresholds } = await supabase
-            .from("level_thresholds")
-            .select("*")
-            .order("level", { ascending: false });
+        // Calculate new level using formula: xp_required(level) = 100 × level^1.8
+        // This replaces the old level_thresholds table lookup, enabling infinite progression.
+        function xpRequiredForLevel(lvl: number): number {
+            return Math.floor(100 * Math.pow(lvl, 1.8));
+        }
 
         let newLevel = 1;
-        if (thresholds) {
-            for (const t of thresholds) {
-                if (newXP >= t.xp_required) {
-                    newLevel = t.level;
-                    break;
-                }
-            }
+        while (newXP >= xpRequiredForLevel(newLevel + 1)) {
+            newLevel++;
         }
         const didLevelUp = newLevel > (profile?.level ?? 1);
 
@@ -148,13 +143,36 @@ serve(async (req) => {
         };
         if (statField && profile) {
             const currentStatValue = (profile as Record<string, unknown>)[statField] as number ?? 0;
-            statUpdate[statField] = currentStatValue + (quest.stat_points ?? 1);
+            // Diminishing returns: effective_gain = raw_points × (10 / (10 + current_stat))
+            const rawPoints = quest.stat_points ?? 1;
+            const effectiveGain = Math.max(1, Math.round(rawPoints * (10 / (10 + currentStatValue))));
+            statUpdate[statField] = currentStatValue + effectiveGain;
         }
 
         await supabase
             .from("profiles")
             .update(statUpdate)
             .eq("id", user.id);
+
+        // 4b. Chain Quest Unlock: if this quest is part of a chain, activate the next step
+        let chainUnlocked: string | null = null;
+        if (quest.chain_id && quest.chain_step && quest.chain_total) {
+            const nextStep = quest.chain_step + 1;
+            if (nextStep <= quest.chain_total) {
+                const { data: nextQuest } = await supabase
+                    .from("quests")
+                    .update({ is_active: true })
+                    .eq("chain_id", quest.chain_id)
+                    .eq("chain_step", nextStep)
+                    .eq("user_id", user.id)
+                    .select("title")
+                    .single();
+
+                if (nextQuest) {
+                    chainUnlocked = (nextQuest as any).title;
+                }
+            }
+        }
 
         // 5. Update streak
         const lastActive = streak?.last_active_date;
@@ -205,6 +223,20 @@ serve(async (req) => {
             .eq("is_completed", true)
             .eq("quests.quest_type", "boss");
 
+        // Count active habits
+        const { count: habitCount } = await supabase
+            .from("habits")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", user.id)
+            .eq("is_active", true);
+
+        // Count shop purchases
+        const { count: shopPurchaseCount } = await supabase
+            .from("shop_items")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", user.id)
+            .eq("is_purchased", true);
+
         // Fetch all achievements not yet unlocked by user
         const { data: userAchievements } = await supabase
             .from("user_achievements")
@@ -236,6 +268,15 @@ serve(async (req) => {
                 case "boss_defeated":
                     earned = (bossCount ?? 0) >= cond.value;
                     break;
+                case "habit_count":
+                    earned = (habitCount ?? 0) >= cond.value;
+                    break;
+                case "gold_reached":
+                    earned = newGold >= cond.value;
+                    break;
+                case "shop_purchase":
+                    earned = (shopPurchaseCount ?? 0) >= cond.value;
+                    break;
             }
 
             if (earned) {
@@ -259,6 +300,7 @@ serve(async (req) => {
                 new_achievements: newAchievements,
                 stat_updated: quest.stat_affected,
                 new_hp: newHp,
+                chain_unlocked: chainUnlocked,
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
