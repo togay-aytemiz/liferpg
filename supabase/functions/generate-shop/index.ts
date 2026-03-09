@@ -96,7 +96,7 @@ serve(async (req) => {
             .eq("is_purchased", false)
             .lt("expires_at", nowIso);
 
-        const likesText = profile?.likes ?\`\\nThings they LIKE (great reward ideas): \${profile.likes}\` : "";
+        const likesText = profile?.likes ? `\nThings they LIKE (great reward ideas): ${profile.likes}` : "";
 
         // Call OpenAI
         const aiResponse = await callOpenAI(
@@ -104,7 +104,7 @@ serve(async (req) => {
                 { role: "system", content: SYSTEM_PROMPT },
                 {
                     role: "user",
-                    content: \`Here is my daily routine:\\n\\n\${profile.life_rhythm}\${likesText}\\n\\nPlease generate 4 enticing items for the shop based on my lifestyle!\`,
+                    content: `Here is my daily routine:\n\n${profile.life_rhythm}${likesText}\n\nPlease generate 4 enticing items for the shop based on my lifestyle!`,
                 },
             ],
             {

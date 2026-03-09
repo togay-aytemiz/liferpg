@@ -12,7 +12,7 @@ create type public.achievement_rarity as enum ('common', 'uncommon', 'rare', 'ep
 -- Defines all possible achievements in the system.
 -- ============================================================
 create table public.achievements (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   
   -- Achievement Info
   title text not null,
@@ -67,7 +67,7 @@ insert into public.achievements (title, description, icon, rarity, unlock_condit
 -- Tracks which achievements a user has unlocked.
 -- ============================================================
 create table public.user_achievements (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   achievement_id uuid not null references public.achievements(id) on delete cascade,
   

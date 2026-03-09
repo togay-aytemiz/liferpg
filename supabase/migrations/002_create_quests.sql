@@ -22,7 +22,7 @@ create type public.stat_category as enum ('strength', 'knowledge', 'wealth', 'ad
 -- Template definitions for quests (shared + user-generated).
 -- ============================================================
 create table public.quests (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   
   -- Ownership: null = system quest, uuid = user-created quest
   user_id uuid references public.profiles(id) on delete cascade,
@@ -96,7 +96,7 @@ create trigger on_quests_updated
 -- One row per user per quest per day.
 -- ============================================================
 create table public.user_quests (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   quest_id uuid not null references public.quests(id) on delete cascade,
   

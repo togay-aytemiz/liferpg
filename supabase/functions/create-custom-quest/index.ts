@@ -56,7 +56,7 @@ If it is an Avoidance Goal:
 - The description should be motivating and confirm it is an avoidance goal.
 
 CONTEXT AWARENESS:
-The user already has the following active habits: ${active_habits ? active_habits.map((h: any) => \`${h.title} (${h.frequency})\`).join(", ") : "None"}.
+The user already has the following active habits: ${active_habits ? active_habits.map((h: any) => `${h.title} (${h.frequency})`).join(", ") : "None"}.
 If their custom prompt is too similar to an existing habit, you should still allow it but perhaps make the title distinct or ensure the stats complement it.
 
 Return EXACTLY ONE JSON object with no markdown formatting. It must match this exact structure:

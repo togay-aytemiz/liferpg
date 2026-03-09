@@ -8,7 +8,7 @@
 -- One row per user, updated daily.
 -- ============================================================
 create table public.streaks (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   
   -- Current active streak
@@ -61,7 +61,7 @@ create trigger on_streaks_updated
 -- REWARDS TABLE (User-defined real-life rewards)
 -- ============================================================
 create table public.rewards (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   
   -- Reward Info
