@@ -9,7 +9,7 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] Implement core UI framework (RPG styling, Cinzel/Inter typography, Dark Slate/Gold/Emerald palette)
 - [x] Define and setup database schemas (Users, Quests, Stats, Achievements)
 
-## Phase 2: Core Mechanics (MVP - Part 1)
+## Phase 2: Core Mechanics (MVP - Part 1) ✅
 - [x] **Authentication & Routing:** Setup basic auth state and React Router.
 - [x] **Life Rhythm Onboarding:** Single-field text input for user routing capture.
 - [x] **Quest Generation (Loading Screen):** Animated RPG progress bar and status steps.
@@ -19,9 +19,9 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Daily Quest System:** Add, edit, and complete repeatable daily quests (Generated from Life Rhythm).
 
 ## Phase 3: Engagement & UI (MVP - Part 2)
-- [ ] **Streak Tracking:** Detect daily consistency and apply XP multipliers.
-- [ ] **Achievement System:** Define and trigger unlockable badges (e.g., First Quest, 7-Day Streak).
-- [ ] **Dashboard UI:** Combine Character card, XP bar, daily quests, and streak into the main view.
+- [x] **Streak Tracking:** Detect daily consistency and apply XP multipliers.
+- [x] **Achievement System:** Define and trigger unlockable badges (e.g., First Quest, 7-Day Streak).
+- [x] **Dashboard UI:** Combine Character card, XP bar, daily quests, and streak into the main view.
 - [ ] **Custom Rewards:** Allow users to define real-life rewards at specific level milestones.
 
 ## Phase 4: Polish & Launch (Version 1.0)
