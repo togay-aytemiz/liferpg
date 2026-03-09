@@ -14,6 +14,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { callOpenAI } from "../_shared/openai.ts";
 
 const MAX_DAILY_SKIPS = 3;
 
@@ -113,6 +114,99 @@ serve(async (req) => {
 
         const remainingSkips = MAX_DAILY_SKIPS - ((todaySkips ?? 0) + 1);
 
+        // =================================================================
+        // 5. GENERATE REPLACEMENT QUEST
+        // Pass full user context + skip reasons so LLM learns immediately.
+        // =================================================================
+
+        // 5a. Fetch user profile (rhythm + stats)
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("life_rhythm, level, stat_strength, stat_knowledge, stat_wealth, stat_adventure, stat_social")
+            .eq("id", user.id)
+            .single();
+
+        // 5b. Fetch history (completed & skipped)
+        const { data: completedQuests } = await supabase
+            .from("user_quests")
+            .select("quests(title, quest_type)")
+            .eq("user_id", user.id)
+            .eq("is_completed", true)
+            .limit(10);
+
+        const { data: skippedQuests } = await supabase
+            .from("user_quests")
+            .select("skip_reason, quests(title, quest_type, stat_affected)")
+            .eq("user_id", user.id)
+            .eq("is_completed", false)
+            .limit(10);
+
+        const historyContext = completedQuests && completedQuests.length > 0
+            ? `\n\nPreviously completed quests: ${completedQuests.map((q: any) => q.quests?.title ?? "").join(", ")}`
+            : "";
+
+        const skipContext = skippedQuests && skippedQuests.length > 0
+            ? `\n\nQuests the user SKIPPED/DISLIKED (avoid similar ones): ${skippedQuests.map((q: any) => {
+                const title = q.quests?.title ?? "Unknown";
+                const reasonStr = q.skip_reason ? `(Reason skipped: ${q.skip_reason})` : "";
+                return `${title} ${reasonStr}`.trim();
+            }).join(" | ")}`
+            : "";
+
+        const replacementPrompt = `You are a game master for LifeRPG. The user just skipped a ${quest.quest_type} quest titled "${quest.title}" because: "${reason}".
+        
+Your job is to generate EXACTLY ONE replacement ${quest.quest_type} quest that fits their routine but AVOIDS what they disliked.
+
+User's Daily Routine:
+${profile?.life_rhythm || "General healthy lifestyle"}
+
+Stats - Strength: ${profile?.stat_strength}, Knowledge: ${profile?.stat_knowledge}, Wealth: ${profile?.stat_wealth}, Adventure: ${profile?.stat_adventure}, Social: ${profile?.stat_social}
+${historyContext}${skipContext}
+
+Return valid JSON:
+{
+  "title": "String (concise, RPG themed)",
+  "description": "String (short)",
+  "difficulty": "easy", "medium", "hard", or "epic",
+  "xp_reward": number (10 to 100),
+  "stat_affected": "strength", "knowledge", "wealth", "adventure", or "social",
+  "stat_points": number (1 to 5)
+}`;
+
+        let newQuest = null;
+        try {
+            const aiResponse = await callOpenAI(
+                [{ role: "system", content: replacementPrompt }],
+                { model: "gpt-4o-mini", temperature: 0.8, response_format: { type: "json_object" } }
+            );
+
+            const generated = JSON.parse(aiResponse);
+
+            // Insert the replacement quest
+            const { data: insertedQuest } = await supabase
+                .from("quests")
+                .insert({
+                    title: generated.title || "Mystery Quest",
+                    description: generated.description || "",
+                    quest_type: quest.quest_type, // keep same type as skipped
+                    difficulty: generated.difficulty || "medium",
+                    xp_reward: Number(generated.xp_reward) || 15,
+                    stat_affected: generated.stat_affected || "strength",
+                    stat_points: Number(generated.stat_points) || 1,
+                    user_id: user.id,
+                    is_ai_generated: true,
+                    is_active: true,
+                    gold_reward: quest.quest_type === 'boss' ? 5 : 0,
+                })
+                .select()
+                .single();
+
+            newQuest = insertedQuest;
+        } catch (e) {
+            console.error("Replacement generation failed:", e);
+            // We don't fail the whole skip request if regeneration fails, just return null for new_quest
+        }
+
         return new Response(
             JSON.stringify({
                 success: true,
@@ -120,7 +214,8 @@ serve(async (req) => {
                 skip_reason: reason,
                 remaining_skips: remainingSkips,
                 max_skips: MAX_DAILY_SKIPS,
-                message: `Quest removed. ${remainingSkips} skip${remainingSkips !== 1 ? 's' : ''} remaining today.`,
+                message: newQuest ? `Quest skipped. Generated replacement: "${newQuest.title}"` : `Quest skipped.`,
+                new_quest: newQuest
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );

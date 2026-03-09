@@ -2,6 +2,7 @@
 // All AI-related calls go through here.
 
 import { supabase } from './supabase';
+import type { Quest } from './database.types';
 
 interface GenerateQuestsResponse {
     success: boolean;
@@ -106,8 +107,9 @@ export async function generateRewards(): Promise<{ success: boolean; rewards: Ar
 /**
  * Call the skip-quest Edge Function.
  * Records that the user doesn't want this quest type. Used as negative feedback for LLM.
+ * Returns the replaced quest to immediately inject into the UI.
  */
-export async function skipQuest(questId: string, reason: string): Promise<{ success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number }> {
+export async function skipQuest(questId: string, reason: string): Promise<{ success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string }> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Not authenticated');
 
@@ -138,5 +140,5 @@ export async function skipQuest(questId: string, reason: string): Promise<{ succ
         throw new Error(response.data.message);
     }
 
-    return response.data as { success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number };
+    return response.data as { success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string };
 }

@@ -66,14 +66,23 @@ export default function Quests() {
 
     const confirmSkip = async (reason: string) => {
         if (!skipModalOpen) return;
-        const { id, title } = skipModalOpen;
+        const { id } = skipModalOpen;
         setSkippingId(id);
         setSkipModalOpen(null); // Close modal
         try {
             const result = await skipQuest(id, reason);
-            // Remove from local list
-            setQuests(prev => prev.filter(q => q.id !== id));
-            showToast(`"${title}" skipped. ${result.remaining_skips} skips left today.`);
+
+            // Remove skipped quest from local list and optionally append the replacement
+            setQuests(prev => {
+                const filtered = prev.filter(q => q.id !== id);
+                if (result.new_quest) {
+                    return [...filtered, result.new_quest].sort((a, b) =>
+                        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                    );
+                }
+                return filtered;
+            });
+            showToast(result.message || `Quest skipped. ${result.remaining_skips} skips left today.`);
         } catch (err: any) {
             console.error(err);
             showToast(err.message || 'Failed to skip quest', 'error');
