@@ -1,0 +1,42 @@
+# Roadmap - lifeRPG
+
+> **Last Updated:** 2026-03-09
+
+This document tracks the structured phases of development for the lifeRPG project, based on the MVP scope outlined in the PRD.
+
+## Phase 1: Foundation & Architecture
+- [ ] Setup project repository and base architecture (Mobile-first framework)
+- [ ] Implement core UI framework (RPG styling, Cinzel/Inter typography, Dark Slate/Gold/Emerald palette)
+- [ ] Define and setup database schemas (Users, Quests, Stats, Achievements)
+
+## Phase 2: Core Mechanics (MVP - Part 1)
+- [ ] **Authentication & Routing:** Setup basic auth state and React Router.
+- [ ] **Life Rhythm Onboarding:** Single-field text input for user routing capture.
+- [ ] **Quest Generation (Loading Screen):** Animated RPG progress bar and status steps.
+- [ ] **Character Profile System:** Avatar, Username, core attributes setup.
+- [ ] **XP & Leveling System:** Implement XP calculation and Level boundaries (Level 1=0, Level 2=100, etc.).
+- [ ] **Stat Progression System:** Logic to map specific actions to stats (Strength, Knowledge, Wealth, Adventure, Social).
+- [ ] **Daily Quest System:** Add, edit, and complete repeatable daily quests (Generated from Life Rhythm).
+
+## Phase 3: Engagement & UI (MVP - Part 2)
+- [ ] **Streak Tracking:** Detect daily consistency and apply XP multipliers.
+- [ ] **Achievement System:** Define and trigger unlockable badges (e.g., First Quest, 7-Day Streak).
+- [ ] **Dashboard UI:** Combine Character card, XP bar, daily quests, and streak into the main view.
+- [ ] **Custom Rewards:** Allow users to define real-life rewards at specific level milestones.
+
+## Phase 4: Polish & Launch (Version 1.0)
+- [ ] **Quest Screen:** Dedicated view for Daily, Side, and Boss quests.
+- [ ] **Settings Screen:** Section to edit "Life Rhythm" and regenerate quests.
+- [ ] **Character & Achievement Screens:** Detailed views for stats and unlocked badges.
+- [ ] Testing, QA, and bug fixing.
+- [ ] Final UI/UX polish (ensure it feels like an RPG HUD).
+
+---
+
+## Post-MVP (Future Features)
+- [ ] Guild system (friends / accountability groups)
+- [ ] PvP challenges (step competitions, productivity battles)
+- [ ] Leaderboards
+- [ ] AI quest generation (AI suggests daily quests)
+- [ ] Loot system (random reward drops)
+- [ ] Character cosmetics
