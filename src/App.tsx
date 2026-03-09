@@ -4,6 +4,9 @@ import Auth from './pages/Auth';
 import Onboarding from './pages/Onboarding';
 import LoadingQuests from './pages/LoadingQuests';
 import Dashboard from './pages/Dashboard';
+import Quests from './pages/Quests';
+import Achievements from './pages/Achievements';
+import Settings from './pages/Settings';
 import './App.css';
 
 // ProtectedRoute: Redirect to /auth if not logged in
@@ -81,6 +84,15 @@ function AppRoutes() {
       } />
       <Route path="/dashboard" element={
         <ProtectedRoute><Dashboard /></ProtectedRoute>
+      } />
+      <Route path="/quests" element={
+        <ProtectedRoute><Quests /></ProtectedRoute>
+      } />
+      <Route path="/achievements" element={
+        <ProtectedRoute><Achievements /></ProtectedRoute>
+      } />
+      <Route path="/settings" element={
+        <ProtectedRoute><Settings /></ProtectedRoute>
       } />
     </Routes>
   );

@@ -18,16 +18,16 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Stat Progression System:** Logic to map specific actions to stats (Strength, Knowledge, Wealth, Adventure, Social).
 - [x] **Daily Quest System:** Add, edit, and complete repeatable daily quests (Generated from Life Rhythm).
 
-## Phase 3: Engagement & UI (MVP - Part 2)
+## Phase 3: Engagement & UI (MVP - Part 2) ✅
 - [x] **Streak Tracking:** Detect daily consistency and apply XP multipliers.
 - [x] **Achievement System:** Define and trigger unlockable badges (e.g., First Quest, 7-Day Streak).
 - [x] **Dashboard UI:** Combine Character card, XP bar, daily quests, and streak into the main view.
 - [x] **Custom Rewards:** AI-generated real-life rewards at level milestones.
 
 ## Phase 4: Polish & Launch (Version 1.0)
-- [ ] **Quest Screen:** Dedicated view for Daily, Side, and Boss quests.
-- [ ] **Settings Screen:** Section to edit "Life Rhythm" and regenerate quests.
-- [ ] **Character & Achievement Screens:** Detailed views for stats and unlocked badges.
+- [x] **Quest Screen:** Dedicated view for Daily, Side, and Boss quests.
+- [x] **Settings Screen:** Section to edit "Life Rhythm" and regenerate quests.
+- [x] **Character & Achievement Screens:** Detailed views for stats and unlocked badges.
 - [ ] Testing, QA, and bug fixing.
 - [ ] Final UI/UX polish (ensure it feels like an RPG HUD).
 

@@ -18,6 +18,9 @@ All notable changes to this project will be documented in this file.
 - **Frontend API Service:** `api.ts` for type-safe Edge Function calls
 - **AI-Generated Rewards:** `generate-rewards` Edge Function creates 6 personalized real-life milestone rewards (Lv.3–15) based on user's life rhythm and stats
 - **Rewards UI:** Milestone rewards section in Dashboard with locked/unlocked/redeemed visual states
+- **Quest Screen:** Dedicated tabbed view (Daily / Side / Boss) with quest completion
+- **Settings Screen:** Username editing, Life Rhythm editing with quest + reward regeneration via Edge Functions
+- **Character & Achievements Screen:** Full character card, stat bars, and achievement grid with rarity-colored cards (common → legendary)
 
 ### Changed
 - Replaced Vite boilerplate with RPG-themed application

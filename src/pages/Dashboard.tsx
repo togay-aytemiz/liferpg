@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { completeQuest, type CompleteQuestResponse } from '../lib/api';
 import type { Quest, Streak, LevelThreshold, Reward } from '../lib/database.types';
-import { Shield, Swords, Search, Crown, Flame, Coins, Check, Sparkles, LogOut, Gift, Lock } from 'lucide-react';
+import { Shield, Swords, Crown, Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Settings } from 'lucide-react';
 
 // Stat bar component
 function StatBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
@@ -376,17 +376,17 @@ export default function Dashboard() {
                     <Shield className="w-6 h-6 drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
                     <span className="text-[10px] font-heading tracking-widest uppercase">Dash</span>
                 </button>
-                <button className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
+                <button onClick={() => navigate('/quests')} className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
                     <Swords className="w-6 h-6 group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] font-heading tracking-widest uppercase">Quests</span>
                 </button>
-                <button className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
-                    <Search className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-heading tracking-widest uppercase">Stats</span>
-                </button>
-                <button className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
+                <button onClick={() => navigate('/achievements')} className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
                     <Crown className="w-6 h-6 group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] font-heading tracking-widest uppercase">Awards</span>
+                </button>
+                <button onClick={() => navigate('/settings')} className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
+                    <Settings className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                    <span className="text-[10px] font-heading tracking-widest uppercase">Settings</span>
                 </button>
             </div>
 
