@@ -156,6 +156,18 @@ Users define real-life rewards.
 
 *Purpose:* reinforce habit loops.
 
+### 4.8 Habit Tracking System (Continuous Tasks)
+Separate from quests, users can define *Habits* that remain active day-to-day.
+- **Good habits:** (e.g., Drink water, Meditate) - Grants drip-feed XP every time it's clicked.
+- **Bad habits:** (e.g., Avoid sugar) - Visualized as standing strength, testing willpower over time.
+
+### 4.9 Shop & Economy System
+Gold is earned through quests and boss battles. It can be spent in the virtual Shop.
+- **Cosmetics:** Unlock new profile avatars or UI themes.
+- **Boost Potions:** Buy a 2-hour XP multiplier (+20% XP) before a deep work session.
+- **Savior Items:** Pay a high gold cost to restore a lost daily streak.
+*Purpose:* Give the virtual economy weight so the "Death Penalty" (losing gold) feels impactful.
+
 ---
 
 ## 5. Core Screens
@@ -193,6 +205,11 @@ Users define real-life rewards.
 - Unlocked achievements
 - Locked achievements
 - Rare badges
+
+**5. Shop / Marketplace**
+- Buy XP Boosts (Potions)
+- Buy Cosmetics
+- Restore lost streaks
 
 ---
 
@@ -260,11 +277,12 @@ The core user loop:
 - Settings (Ability to edit Life Rhythm and regenerate quests)
 
 ### Future Features (Post-MVP)
+- Habit tracking system (drip-feed XP, continuous tasks vs daily quests)
+- Shop & Economy (spend gold on potions, cosmetics, streak restores)
 - Guild system (friends / accountability groups)
 - PvP challenges (step competitions, productivity battles)
 - Leaderboards
-- AI quest generation (AI suggests daily quests)
-- Loot system (random reward drops)
+- Loot system (random reward drops from boss fights)
 - Character cosmetics
 
 ---

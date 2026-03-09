@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { regenerateQuests, generateRewards } from '../lib/api';
 import { ArrowLeft, Save, RefreshCw, LogOut, Scroll } from 'lucide-react';
+import BottomNav from '../components/BottomNav';
 
 export default function Settings() {
     const navigate = useNavigate();
@@ -217,6 +218,9 @@ export default function Settings() {
                 </div>
 
             </div>
+
+            {/* Bottom Navigation */}
+            <BottomNav />
         </div>
     );
 }

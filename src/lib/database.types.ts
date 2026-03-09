@@ -33,6 +33,7 @@ export interface Profile {
     stat_wealth: number;
     stat_adventure: number;
     stat_social: number;
+    streak_freezes: number;
     created_at: string;
     updated_at: string;
 }
@@ -113,6 +114,23 @@ export interface Reward {
     created_at: string;
 }
 
+export interface Habit {
+    id: string;
+    user_id: string;
+    title: string;
+    is_good: boolean;
+    stat_affected: StatCategory;
+    is_active: boolean;
+    created_at: string;
+}
+
+export interface HabitLog {
+    id: string;
+    user_id: string;
+    habit_id: string;
+    created_at: string;
+}
+
 // -- Database schema mapping (for Supabase client generic) --
 
 export interface Database {
@@ -157,6 +175,16 @@ export interface Database {
                 Row: Reward;
                 Insert: Partial<Reward>;
                 Update: Partial<Reward>;
+            };
+            habits: {
+                Row: Habit;
+                Insert: Partial<Habit>;
+                Update: Partial<Habit>;
+            };
+            habit_logs: {
+                Row: HabitLog;
+                Insert: Partial<HabitLog>;
+                Update: Partial<HabitLog>;
             };
         };
         Enums: {

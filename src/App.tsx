@@ -2,11 +2,10 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './pages/Auth';
 import Onboarding from './pages/Onboarding';
-import LoadingQuests from './pages/LoadingQuests';
-import Dashboard from './pages/Dashboard';
 import Quests from './pages/Quests';
 import Achievements from './pages/Achievements';
 import Settings from './pages/Settings';
+import Shop from './pages/Shop';
 import './App.css';
 
 // ProtectedRoute: Redirect to /auth if not logged in
@@ -79,11 +78,8 @@ function AppRoutes() {
       <Route path="/onboarding" element={
         <ProtectedRoute><Onboarding /></ProtectedRoute>
       } />
-      <Route path="/generating" element={
-        <ProtectedRoute><LoadingQuests /></ProtectedRoute>
-      } />
-      <Route path="/dashboard" element={
-        <ProtectedRoute><Dashboard /></ProtectedRoute>
+      <Route path="/" element={
+        <ProtectedRoute><Quests /></ProtectedRoute>
       } />
       <Route path="/quests" element={
         <ProtectedRoute><Quests /></ProtectedRoute>
@@ -93,6 +89,9 @@ function AppRoutes() {
       } />
       <Route path="/settings" element={
         <ProtectedRoute><Settings /></ProtectedRoute>
+      } />
+      <Route path="/shop" element={
+        <ProtectedRoute><Shop /></ProtectedRoute>
       } />
     </Routes>
   );

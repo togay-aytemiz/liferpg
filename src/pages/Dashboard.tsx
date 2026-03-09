@@ -4,7 +4,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { completeQuest, type CompleteQuestResponse } from '../lib/api';
 import type { Quest, Streak, LevelThreshold, Reward } from '../lib/database.types';
-import { Shield, Swords, Crown, Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Settings, Heart, Plus } from 'lucide-react';
+import { Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Heart, Plus } from 'lucide-react';
+import BottomNav from '../components/BottomNav';
+import Habits from '../components/Habits';
 
 // Stat bar component
 function StatBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
@@ -384,7 +386,12 @@ export default function Dashboard() {
                     </div>
                 )}
 
-                {/* Empty state */}
+                {/* Habits Section */}
+                <div className="pt-2 border-t border-slate-800">
+                    <Habits />
+                </div>
+
+                {/* Empty state (Quests only) */}
                 {quests.length === 0 && (
                     <div className="text-center py-12">
                         <p className="text-slate-500 text-sm">No quests yet. Complete onboarding to generate your quests!</p>
@@ -393,24 +400,7 @@ export default function Dashboard() {
             </div>
 
             {/* Bottom HUD Navigation */}
-            <div className="absolute bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-4 flex justify-around items-center">
-                <button className="flex flex-col items-center gap-1 text-amber-500 group">
-                    <Shield className="w-6 h-6 drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
-                    <span className="text-[10px] font-heading tracking-widest uppercase">Dash</span>
-                </button>
-                <button onClick={() => navigate('/quests')} className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
-                    <Swords className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-heading tracking-widest uppercase">Quests</span>
-                </button>
-                <button onClick={() => navigate('/achievements')} className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
-                    <Crown className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-heading tracking-widest uppercase">Awards</span>
-                </button>
-                <button onClick={() => navigate('/settings')} className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors group">
-                    <Settings className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-heading tracking-widest uppercase">Settings</span>
-                </button>
-            </div>
+            <BottomNav />
 
         </div>
     );

@@ -35,6 +35,8 @@ This document tracks the structured phases of development for the lifeRPG projec
 
 ## Post-MVP (Future Features)
 - [x] HP (Health Points) system and death penalties (loss of streak and gold)
+- [ ] Habit Tracking System (Continuous/repeatable actions distinct from 1-off quests)
+- [ ] Shop & Economy (Spend gold on potions, cosmetics, streak restoration)
 - [ ] Guild system (friends / accountability groups)
 - [ ] PvP challenges (step competitions, productivity battles)
 - [ ] Leaderboards

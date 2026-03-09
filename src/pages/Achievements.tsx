@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Achievement, UserAchievement } from '../lib/database.types';
 import { ArrowLeft, Trophy } from 'lucide-react';
+import BottomNav from '../components/BottomNav';
 
 export default function Achievements() {
     const navigate = useNavigate();
@@ -109,6 +110,9 @@ export default function Achievements() {
                 </div>
 
             </div>
+
+            {/* Bottom Navigation */}
+            <BottomNav />
         </div>
     );
 }

@@ -162,3 +162,45 @@ export async function createCustomQuest(prompt: string, questType: 'daily' | 'si
 
     return response.data as { success: boolean; message: string; quest: Quest };
 }
+
+/**
+ * Call the buy-item Edge Function.
+ * Spends user gold to purchase items like Health Potions, XP Scrolls, or Streak Freezes.
+ */
+export async function buyItem(itemId: string): Promise<{ success: boolean; message: string; updates: any }> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const response = await supabase.functions.invoke('buy-item', {
+        body: { item_id: itemId },
+    });
+
+    if (response.error) {
+        throw new Error(response.error.message || 'Failed to buy item');
+    }
+
+    if (response.data && response.data.error) {
+        throw new Error(response.data.error);
+    }
+
+    return response.data as { success: boolean; message: string; updates: any };
+}
+
+/**
+ * Call the log_habit Postgres RPC function.
+ * Tracks a daily habit and applies Stat/XP/HP/Gold changes based on whether it is good or bad.
+ */
+export async function logHabit(habitId: string): Promise<any> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase.rpc('log_habit' as any, {
+        p_habit_id: habitId,
+    } as any);
+
+    if (error) {
+        throw new Error(error.message || 'Failed to log habit');
+    }
+
+    return data;
+}

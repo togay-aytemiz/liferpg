@@ -32,7 +32,7 @@ serve(async (req) => {
         // 1. Get all users (profiles)
         const { data: profiles, error: profErr } = await supabaseAdmin
             .from("profiles")
-            .select("id, hp, max_hp, gold");
+            .select("id, hp, max_hp, gold, streak_freezes");
 
         if (profErr || !profiles) {
             throw new Error(`Failed to fetch profiles: ${profErr?.message}`);
@@ -76,8 +76,19 @@ serve(async (req) => {
                 .eq("user_id", userId)
                 .single();
 
-            // Apply HP Penalty
+            // Apply Penalties (HP or Streak loss)
             if (hpPenalty > 0 || (streakRow && streakRow.last_active_date !== yesterdayStr && streakRow.last_active_date !== today.toISOString().split("T")[0])) {
+
+                // If user has a freeze, consume the freeze instead of penalizing!
+                if (profile.streak_freezes > 0) {
+                    await supabaseAdmin
+                        .from("profiles")
+                        .update({ streak_freezes: profile.streak_freezes - 1 })
+                        .eq("id", userId);
+                    console.log(`User ${userId} consumed a streak freeze. Zero penalties applied.`);
+                    continue; // Skip the rest of the loop for this user
+                }
+
                 let newHP = profile.hp - hpPenalty;
                 let newGold = profile.gold;
 

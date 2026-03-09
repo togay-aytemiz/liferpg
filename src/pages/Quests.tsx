@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import type { Quest } from '../lib/database.types';
 import { completeQuest, skipQuest, createCustomQuest } from '../lib/api';
 import { ArrowLeft, Check, Swords, Shield, Skull, X, Plus } from 'lucide-react';
+import BottomNav from '../components/BottomNav';
 
 export default function Quests() {
     const navigate = useNavigate();
@@ -309,6 +310,9 @@ export default function Quests() {
                     </div>
                 </div>
             )}
+
+            {/* Bottom Navigation */}
+            <BottomNav />
         </div>
     );
 }
