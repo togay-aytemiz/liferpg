@@ -102,3 +102,22 @@ export async function generateRewards(): Promise<{ success: boolean; rewards: Ar
 
     return response.data as { success: boolean; rewards: Array<Record<string, unknown>> };
 }
+
+/**
+ * Call the skip-quest Edge Function.
+ * Records that the user doesn't want this quest type. Used as negative feedback for LLM.
+ */
+export async function skipQuest(questId: string, reason?: string): Promise<{ success: boolean; skipped_quest: string }> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const response = await supabase.functions.invoke('skip-quest', {
+        body: { quest_id: questId, reason },
+    });
+
+    if (response.error) {
+        throw new Error(response.error.message || 'Failed to skip quest');
+    }
+
+    return response.data as { success: boolean; skipped_quest: string };
+}

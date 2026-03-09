@@ -11,7 +11,7 @@
 //   4. Return generated rewards
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { callOpenAI } from "../_shared/openai.ts";
+import { callOpenAI, validateRewardResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 
 const SYSTEM_PROMPT = `You are a reward designer for LifeRPG, a gamified productivity app.
@@ -108,7 +108,7 @@ Stats - Strength: ${profile.stat_strength}, Knowledge: ${profile.stat_knowledge}
             }
         );
 
-        const generated = JSON.parse(aiResponse);
+        const generated = validateRewardResponse(aiResponse);
 
         // Delete old rewards for this user (replace with fresh AI-generated ones)
         await supabase
@@ -116,8 +116,8 @@ Stats - Strength: ${profile.stat_strength}, Knowledge: ${profile.stat_knowledge}
             .delete()
             .eq("user_id", user.id);
 
-        // Insert new rewards
-        const rewardsToInsert = generated.rewards.map((r: Record<string, unknown>) => ({
+        // Insert new rewards — only whitelisted fields from validation
+        const rewardsToInsert = generated.rewards.map(r => ({
             user_id: user.id,
             title: r.title,
             description: r.description,

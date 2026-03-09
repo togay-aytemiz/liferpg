@@ -10,7 +10,7 @@
 // Auth: Requires valid Supabase JWT
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { callOpenAI } from "../_shared/openai.ts";
+import { callOpenAI, validateQuestResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 
 const SYSTEM_PROMPT = `You are a game master for LifeRPG, a gamified productivity app.
@@ -49,6 +49,7 @@ You MUST return valid JSON with this exact structure:
 Rules:
 - Generate 4-6 daily quests, 2-3 side quests, 1 boss quest
 - If the user has completed quests before, make new quests slightly more challenging or varied
+- If the user has SKIPPED/DISLIKED certain quests, do NOT generate similar ones
 - Match activities to stats: exercise→strength, reading→knowledge, work→wealth, travel→adventure, social→social
 - Keep titles concise and RPG-themed`;
 
@@ -111,13 +112,28 @@ serve(async (req) => {
             }).join(", ")}`
             : "";
 
+        // 3b. Fetch skipped/disliked quests for negative feedback
+        const { data: skippedQuests } = await supabase
+            .from("user_quests")
+            .select("quest_id, quests(title, quest_type, stat_affected)")
+            .eq("user_id", user.id)
+            .eq("is_completed", false)
+            .limit(20);
+
+        const skipContext = skippedQuests && skippedQuests.length > 0
+            ? `\n\nQuests the user SKIPPED/DISLIKED (avoid similar ones): ${skippedQuests.map((q: Record<string, unknown>) => {
+                const quest = q.quests as Record<string, string> | null;
+                return quest?.title ?? "Unknown";
+            }).join(", ")}`
+            : "";
+
         // 4. Call OpenAI
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
                 {
                     role: "user",
-                    content: `Here is my updated daily routine:\n\n${life_rhythm}${historyContext}`,
+                    content: `Here is my updated daily routine:\n\n${life_rhythm}${historyContext}${skipContext}`,
                 },
             ],
             {
@@ -128,26 +144,44 @@ serve(async (req) => {
             }
         );
 
-        const generatedQuests = JSON.parse(aiResponse);
+        const generatedQuests = validateQuestResponse(aiResponse);
 
-        // 5. Insert new quests
+        // 5. Insert new quests — explicit field mapping, no raw AI spread
         const allQuests = [
-            ...generatedQuests.daily_quests.map((q: Record<string, unknown>) => ({
-                ...q,
+            ...generatedQuests.daily_quests.map(q => ({
+                title: q.title,
+                description: q.description,
+                quest_type: q.quest_type,
+                difficulty: q.difficulty,
+                xp_reward: q.xp_reward,
+                stat_affected: q.stat_affected,
+                stat_points: q.stat_points,
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,
                 gold_reward: 0,
             })),
-            ...generatedQuests.side_quests.map((q: Record<string, unknown>) => ({
-                ...q,
+            ...generatedQuests.side_quests.map(q => ({
+                title: q.title,
+                description: q.description,
+                quest_type: q.quest_type,
+                difficulty: q.difficulty,
+                xp_reward: q.xp_reward,
+                stat_affected: q.stat_affected,
+                stat_points: q.stat_points,
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,
                 gold_reward: 0,
             })),
             {
-                ...generatedQuests.boss_quest,
+                title: generatedQuests.boss_quest.title,
+                description: generatedQuests.boss_quest.description,
+                quest_type: generatedQuests.boss_quest.quest_type,
+                difficulty: generatedQuests.boss_quest.difficulty,
+                xp_reward: generatedQuests.boss_quest.xp_reward,
+                stat_affected: generatedQuests.boss_quest.stat_affected,
+                stat_points: generatedQuests.boss_quest.stat_points,
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,

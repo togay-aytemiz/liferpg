@@ -11,7 +11,7 @@
 // Auth: Requires valid Supabase JWT (user must be logged in)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { callOpenAI } from "../_shared/openai.ts";
+import { callOpenAI, validateQuestResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 
 const SYSTEM_PROMPT = `You are a game master for LifeRPG, a gamified productivity app.
@@ -118,27 +118,45 @@ serve(async (req) => {
             }
         );
 
-        // Parse the AI-generated quests
-        const generatedQuests = JSON.parse(aiResponse);
+        // Parse and VALIDATE the AI-generated quests (whitelists fields)
+        const generatedQuests = validateQuestResponse(aiResponse);
 
-        // Prepare quests for database insertion
+        // Prepare quests for database insertion — only known columns
         const allQuests = [
-            ...generatedQuests.daily_quests.map((q: Record<string, unknown>) => ({
-                ...q,
+            ...generatedQuests.daily_quests.map(q => ({
+                title: q.title,
+                description: q.description,
+                quest_type: q.quest_type,
+                difficulty: q.difficulty,
+                xp_reward: q.xp_reward,
+                stat_affected: q.stat_affected,
+                stat_points: q.stat_points,
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,
                 gold_reward: 0,
             })),
-            ...generatedQuests.side_quests.map((q: Record<string, unknown>) => ({
-                ...q,
+            ...generatedQuests.side_quests.map(q => ({
+                title: q.title,
+                description: q.description,
+                quest_type: q.quest_type,
+                difficulty: q.difficulty,
+                xp_reward: q.xp_reward,
+                stat_affected: q.stat_affected,
+                stat_points: q.stat_points,
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,
                 gold_reward: 0,
             })),
             {
-                ...generatedQuests.boss_quest,
+                title: generatedQuests.boss_quest.title,
+                description: generatedQuests.boss_quest.description,
+                quest_type: generatedQuests.boss_quest.quest_type,
+                difficulty: generatedQuests.boss_quest.difficulty,
+                xp_reward: generatedQuests.boss_quest.xp_reward,
+                stat_affected: generatedQuests.boss_quest.stat_affected,
+                stat_points: generatedQuests.boss_quest.stat_points,
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,

@@ -57,6 +57,24 @@ serve(async (req) => {
             );
         }
 
+        // Guard: check if already completed today (prevent duplicate XP)
+        const today = new Date().toISOString().split("T")[0];
+        const { data: existingCompletion } = await supabase
+            .from("user_quests")
+            .select("id")
+            .eq("user_id", user.id)
+            .eq("quest_id", quest_id)
+            .eq("quest_date", today)
+            .eq("is_completed", true)
+            .maybeSingle();
+
+        if (existingCompletion) {
+            return new Response(
+                JSON.stringify({ error: "Quest already completed today", already_completed: true }),
+                { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
         // 2. Fetch user profile and streak
         const { data: profile } = await supabase
             .from("profiles")
@@ -75,8 +93,7 @@ serve(async (req) => {
         const awardedXP = Math.round(baseXP * xpMultiplier);
         const awardedGold = quest.gold_reward ?? 0;
 
-        // 3. Insert user_quest completion record
-        const today = new Date().toISOString().split("T")[0];
+        // 3. Insert user_quest completion record (reuse `today` from guard above)
         const { error: uqError } = await supabase
             .from("user_quests")
             .upsert({

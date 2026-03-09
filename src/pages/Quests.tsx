@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Quest } from '../lib/database.types';
-import { completeQuest } from '../lib/api';
-import { ArrowLeft, Check, Swords, Shield, Skull } from 'lucide-react';
+import { completeQuest, skipQuest } from '../lib/api';
+import { ArrowLeft, Check, Swords, Shield, Skull, X } from 'lucide-react';
 
 export default function Quests() {
     const navigate = useNavigate();
@@ -12,7 +12,14 @@ export default function Quests() {
     const [quests, setQuests] = useState<Quest[]>([]);
     const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
     const [loadingId, setLoadingId] = useState<string | null>(null);
+    const [skippingId, setSkippingId] = useState<string | null>(null);
     const [tab, setTab] = useState<'daily' | 'side' | 'boss'>('daily');
+    const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+
+    const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3000);
+    };
 
     const fetchQuests = useCallback(async () => {
         if (!user) return;
@@ -37,14 +44,33 @@ export default function Quests() {
     useEffect(() => { fetchQuests(); }, [fetchQuests]);
 
     const handleComplete = async (questId: string) => {
-        if (completedIds.has(questId) || loadingId) return;
+        if (completedIds.has(questId) || loadingId || skippingId) return;
         setLoadingId(questId);
         try {
-            await completeQuest(questId);
+            const result = await completeQuest(questId);
             setCompletedIds(prev => new Set([...prev, questId]));
             await refreshProfile();
-        } catch (err) { console.error(err); }
+            showToast(`+${result.xp_awarded} XP earned!`);
+        } catch (err) {
+            console.error(err);
+            showToast('Failed to complete quest', 'error');
+        }
         setLoadingId(null);
+    };
+
+    const handleSkip = async (questId: string, title: string) => {
+        if (loadingId || skippingId) return;
+        setSkippingId(questId);
+        try {
+            await skipQuest(questId, 'not interested');
+            // Remove from local list
+            setQuests(prev => prev.filter(q => q.id !== questId));
+            showToast(`"${title}" removed. Future quests will adapt.`);
+        } catch (err) {
+            console.error(err);
+            showToast('Failed to skip quest', 'error');
+        }
+        setSkippingId(null);
     };
 
     const filtered = quests.filter(q => q.quest_type === tab);
@@ -84,6 +110,16 @@ export default function Quests() {
                 ))}
             </div>
 
+            {/* Toast */}
+            {toast && (
+                <div className={`mx-4 mb-3 px-4 py-2.5 rounded-lg text-sm text-center animate-in fade-in slide-in-from-top-2 duration-200 ${toast.type === 'error'
+                        ? 'bg-red-900/40 border border-red-800 text-red-400'
+                        : 'bg-emerald-900/40 border border-emerald-800 text-emerald-400'
+                    }`}>
+                    {toast.msg}
+                </div>
+            )}
+
             {/* Quest List */}
             <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-2.5">
                 {filtered.length === 0 && (
@@ -92,12 +128,13 @@ export default function Quests() {
                 {filtered.map(q => {
                     const done = completedIds.has(q.id);
                     const isLoading = loadingId === q.id;
+                    const isSkipping = skippingId === q.id;
                     return (
                         <div key={q.id} className={`bg-slate-800 border rounded-lg p-4 flex items-start gap-3 shadow-hud transition-all ${done ? 'border-emerald-800/50 opacity-60' : q.quest_type === 'boss' ? 'border-red-900/60' : 'border-slate-700'
                             }`}>
                             <button
                                 onClick={() => handleComplete(q.id)}
-                                disabled={done || !!loadingId}
+                                disabled={done || !!loadingId || !!skippingId}
                                 className={`w-7 h-7 rounded mt-0.5 border-2 flex items-center justify-center shrink-0 transition-all ${done ? 'bg-emerald-500 border-emerald-500' : 'bg-slate-900 border-slate-600 hover:border-amber-500'
                                     }`}
                             >
@@ -118,6 +155,21 @@ export default function Quests() {
                                     {q.stat_affected && <span className="text-xs text-slate-500 capitalize">{q.stat_affected}</span>}
                                 </div>
                             </div>
+                            {/* Skip/Dislike button */}
+                            {!done && (
+                                <button
+                                    onClick={() => handleSkip(q.id, q.title)}
+                                    disabled={!!loadingId || !!skippingId}
+                                    title="Skip this quest"
+                                    className="text-slate-600 hover:text-red-400 transition-colors p-1 mt-0.5 shrink-0"
+                                >
+                                    {isSkipping ? (
+                                        <div className="w-4 h-4 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                                    ) : (
+                                        <X className="w-4 h-4" />
+                                    )}
+                                </button>
+                            )}
                         </div>
                     );
                 })}

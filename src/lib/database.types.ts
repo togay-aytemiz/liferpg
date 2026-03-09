@@ -108,14 +108,46 @@ export interface Reward {
 export interface Database {
     public: {
         Tables: {
-            profiles: { Row: Profile };
-            level_thresholds: { Row: LevelThreshold };
-            quests: { Row: Quest };
-            user_quests: { Row: UserQuest };
-            achievements: { Row: Achievement };
-            user_achievements: { Row: UserAchievement };
-            streaks: { Row: Streak };
-            rewards: { Row: Reward };
+            profiles: {
+                Row: Profile;
+                Insert: Partial<Profile> & { id: string };
+                Update: Partial<Omit<Profile, 'id' | 'created_at'>>;
+            };
+            level_thresholds: {
+                Row: LevelThreshold;
+                Insert: LevelThreshold;
+                Update: Partial<LevelThreshold>;
+            };
+            quests: {
+                Row: Quest;
+                Insert: Partial<Quest> & { title: string; user_id: string };
+                Update: Partial<Omit<Quest, 'id' | 'created_at'>>;
+            };
+            user_quests: {
+                Row: UserQuest;
+                Insert: Partial<UserQuest> & { user_id: string; quest_id: string };
+                Update: Partial<Omit<UserQuest, 'id' | 'created_at'>>;
+            };
+            achievements: {
+                Row: Achievement;
+                Insert: Partial<Achievement> & { title: string };
+                Update: Partial<Omit<Achievement, 'id' | 'created_at'>>;
+            };
+            user_achievements: {
+                Row: UserAchievement;
+                Insert: Partial<UserAchievement> & { user_id: string; achievement_id: string };
+                Update: Partial<Omit<UserAchievement, 'id'>>;
+            };
+            streaks: {
+                Row: Streak;
+                Insert: Partial<Streak> & { user_id: string };
+                Update: Partial<Omit<Streak, 'id' | 'created_at'>>;
+            };
+            rewards: {
+                Row: Reward;
+                Insert: Partial<Reward> & { user_id: string; title: string };
+                Update: Partial<Omit<Reward, 'id' | 'created_at'>>;
+            };
         };
         Enums: {
             quest_type: QuestType;
