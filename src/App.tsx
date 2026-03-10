@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './pages/Auth';
 import Onboarding from './pages/Onboarding';
@@ -8,6 +8,8 @@ import Quests from './pages/Quests';
 import Achievements from './pages/Achievements';
 import Settings from './pages/Settings';
 import Shop from './pages/Shop';
+import BottomNav from './components/BottomNav';
+import { hasCompletedOnboarding } from './lib/onboarding';
 
 // ProtectedRoute: Redirect to /auth if not logged in
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -38,13 +40,28 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
-    // If user has a life_rhythm, go to dashboard; otherwise onboarding
-    if (profile?.life_rhythm) {
+    if (hasCompletedOnboarding(profile)) {
       return <Navigate to="/dashboard" replace />;
     }
     return <Navigate to="/onboarding" replace />;
   }
 
+  return <>{children}</>;
+}
+
+function OnboardingRoute({ children }: { children: React.ReactNode }) {
+  const { user, profile, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!user) return <Navigate to="/auth" replace />;
+  if (hasCompletedOnboarding(profile)) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -62,7 +79,7 @@ function AppRoutes() {
   // Determine where root "/" should redirect
   const rootRedirect = !user
     ? '/auth'
-    : profile?.life_rhythm
+    : hasCompletedOnboarding(profile)
       ? '/dashboard'
       : '/onboarding';
 
@@ -77,30 +94,33 @@ function AppRoutes() {
 
       {/* Protected */}
       <Route path="/onboarding" element={
-        <ProtectedRoute><Onboarding /></ProtectedRoute>
+        <OnboardingRoute><Onboarding /></OnboardingRoute>
       } />
       <Route path="/generating" element={
         <ProtectedRoute><LoadingQuests /></ProtectedRoute>
       } />
-      <Route path="/dashboard" element={
-        <ProtectedRoute><Dashboard /></ProtectedRoute>
-      } />
-      <Route path="/" element={
-        <ProtectedRoute><Dashboard /></ProtectedRoute>
-      } />
-      <Route path="/quests" element={
-        <ProtectedRoute><Quests /></ProtectedRoute>
-      } />
-      <Route path="/achievements" element={
-        <ProtectedRoute><Achievements /></ProtectedRoute>
-      } />
-      <Route path="/settings" element={
-        <ProtectedRoute><Settings /></ProtectedRoute>
-      } />
-      <Route path="/shop" element={
-        <ProtectedRoute><Shop /></ProtectedRoute>
-      } />
+
+      <Route element={<ProtectedNavLayout />}>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/quests" element={<Quests />} />
+        <Route path="/achievements" element={<Achievements />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/shop" element={<Shop />} />
+      </Route>
     </Routes>
+  );
+}
+
+function ProtectedNavLayout() {
+  return (
+    <ProtectedRoute>
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col">
+          <Outlet />
+        </div>
+        <BottomNav />
+      </div>
+    </ProtectedRoute>
   );
 }
 

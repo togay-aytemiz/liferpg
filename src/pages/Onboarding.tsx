@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Scroll, Sparkles } from 'lucide-react';
+import {
+    RPG_FIELD_LABEL_CLASS,
+    RPG_TEXTAREA_MAIN_CLASS,
+    RPG_TEXTAREA_SUB_CLASS
+} from '../lib/formStyles';
 
 export default function Onboarding() {
     const navigate = useNavigate();
@@ -19,6 +24,7 @@ export default function Onboarding() {
         // Navigate immediately to the quest generation loading screen, passing all context
         navigate('/generating', {
             state: {
+                generationId: crypto.randomUUID(),
                 lifeRhythm: lifeRhythm.trim(),
                 likes: likes.trim() || null,
                 dislikes: dislikes.trim() || null,
@@ -50,7 +56,7 @@ export default function Onboarding() {
                 <div className="flex flex-col gap-5 pb-2">
                     {/* Life Rhythm (Required) */}
                     <div className="flex flex-col gap-2">
-                        <label htmlFor="rhythm" className="text-[0.92rem] font-heading tracking-wide text-slate-300 ml-1 text-left">
+                        <label htmlFor="rhythm" className={RPG_FIELD_LABEL_CLASS}>
                             Describe your typical day / routine <span className="text-red-400">*</span>
                         </label>
                         <textarea
@@ -58,14 +64,13 @@ export default function Onboarding() {
                             value={lifeRhythm}
                             onChange={(e) => setLifeRhythm(e.target.value)}
                             placeholder={`"I wake up at 7:30, work 9-5, hit the gym in the evening..."`}
-                            className="w-full min-h-[120px] p-3 text-sm bg-slate-800/80 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 resize-none"
-                            autoFocus
+                            className={RPG_TEXTAREA_MAIN_CLASS}
                         />
                     </div>
 
                     {/* Likes & Hobbies (Optional) */}
                     <div className="flex flex-col gap-2">
-                        <label htmlFor="likes" className="text-[0.92rem] font-heading tracking-wide text-slate-300 ml-1 text-left">
+                        <label htmlFor="likes" className={RPG_FIELD_LABEL_CLASS}>
                             What do you enjoy doing?
                         </label>
                         <textarea
@@ -73,13 +78,13 @@ export default function Onboarding() {
                             value={likes}
                             onChange={(e) => setLikes(e.target.value)}
                             placeholder={`"Gaming, reading fantasy books, cooking Italian food..."`}
-                            className="w-full min-h-[70px] p-2.5 text-sm bg-slate-800/60 border border-slate-700/60 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 resize-none"
+                            className={RPG_TEXTAREA_SUB_CLASS}
                         />
                     </div>
 
                     {/* Dislikes (Optional) */}
                     <div className="flex flex-col gap-2">
-                        <label htmlFor="dislikes" className="text-[0.92rem] font-heading tracking-wide text-slate-300 ml-1 text-left">
+                        <label htmlFor="dislikes" className={RPG_FIELD_LABEL_CLASS}>
                             What do you hate doing?
                         </label>
                         <textarea
@@ -87,13 +92,13 @@ export default function Onboarding() {
                             value={dislikes}
                             onChange={(e) => setDislikes(e.target.value)}
                             placeholder={`"I hate running, crowded places, doing the dishes..."`}
-                            className="w-full min-h-[70px] p-2.5 text-sm bg-slate-800/60 border border-slate-700/60 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50 resize-none"
+                            className={RPG_TEXTAREA_SUB_CLASS}
                         />
                     </div>
 
                     {/* Focus Areas (Optional) */}
                     <div className="flex flex-col gap-2.5">
-                        <label htmlFor="focusAreas" className="text-[0.92rem] font-heading tracking-wide text-slate-300 ml-1 text-left">
+                        <label htmlFor="focusAreas" className={RPG_FIELD_LABEL_CLASS}>
                             What should we focus on?
                         </label>
                         <button
@@ -101,14 +106,14 @@ export default function Onboarding() {
                             onClick={() => setSurpriseMe((prev) => !prev)}
                             aria-pressed={surpriseMe}
                             className={`w-full rounded-xl border p-3 text-left transition-all duration-200 ${surpriseMe
-                                ? 'border-amber-500/50 bg-amber-500/10 shadow-glow-gold'
-                                : 'border-slate-700/70 bg-slate-800/40 hover:border-slate-600 hover:bg-slate-800/70'
+                                ? 'border-amber-500/50 bg-amber-500/8 shadow-glow-gold'
+                                : 'border-[#324a6a]/70 bg-[#172741]/65 hover:border-[#446186] hover:bg-[#1b2e4a]/82'
                                 }`}
                         >
                             <div className="flex items-center gap-3">
                                 <span className={`w-5 h-5 rounded border flex items-center justify-center text-xs font-bold transition-all ${surpriseMe
                                     ? 'border-amber-400 bg-amber-500 text-slate-900'
-                                    : 'border-slate-500 text-transparent'
+                                    : 'border-[#6d89ad] text-transparent'
                                     }`}>
                                     ✓
                                 </span>
@@ -128,7 +133,7 @@ export default function Onboarding() {
                             disabled={surpriseMe}
                             onChange={(e) => setFocusAreas(e.target.value)}
                             placeholder={`"I want to focus on my career, learn a new language, save money..."`}
-                            className="w-full min-h-[70px] p-2.5 text-sm bg-slate-800/60 border border-slate-700/60 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 resize-none disabled:cursor-not-allowed disabled:border-amber-500/20 disabled:bg-slate-800/35 disabled:text-slate-500"
+                            className={`${RPG_TEXTAREA_SUB_CLASS} disabled:cursor-not-allowed disabled:border-amber-500/20 disabled:bg-[#172741]/45 disabled:text-slate-500`}
                         />
                     </div>
                 </div>

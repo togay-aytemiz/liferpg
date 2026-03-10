@@ -11,6 +11,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -92,7 +93,7 @@ serve(async (req) => {
         const xpMultiplier = streak?.xp_multiplier ?? 1.0;
         const baseXP = quest.xp_reward ?? 15;
         const awardedXP = Math.round(baseXP * xpMultiplier);
-        const awardedGold = quest.gold_reward ?? 0;
+        const awardedGold = getQuestGoldReward(quest.quest_type, quest.difficulty, quest.gold_reward);
 
         // 3. Insert user_quest completion record (reuse `today` from guard above)
         const { error: uqError } = await supabase
@@ -154,6 +155,14 @@ serve(async (req) => {
             .from("profiles")
             .update(statUpdate)
             .eq("id", user.id);
+
+        if (quest.quest_type === "boss") {
+            await supabase
+                .from("quests")
+                .update({ is_active: false })
+                .eq("id", quest_id)
+                .eq("user_id", user.id);
+        }
 
         // 4b. Chain Quest Unlock: if this quest is part of a chain, activate the next step
         let chainUnlocked: string | null = null;

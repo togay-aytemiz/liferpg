@@ -42,25 +42,14 @@
     height: 100%;
     width: 100%;
     overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   #root {
     height: 100%;
     width: 100%;
     padding: 0;
-  }
-
-  input:-webkit-autofill,
-  input:-webkit-autofill:hover,
-  input:-webkit-autofill:focus,
-  textarea:-webkit-autofill,
-  textarea:-webkit-autofill:hover,
-  textarea:-webkit-autofill:focus {
-    -webkit-text-fill-color: #f8fafc;
-    -webkit-box-shadow: 0 0 0 1000px #1e293b inset;
-    box-shadow: 0 0 0 1000px #1e293b inset;
-    caret-color: #f8fafc;
-    transition: background-color 9999s ease-out 0s;
   }
 
   h1,
@@ -70,6 +59,42 @@
   h5,
   h6 {
     @apply font-heading tracking-wide;
+  }
+
+  .rpg-field {
+    color-scheme: dark;
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: rgba(23, 39, 65, 0.82);
+    background-clip: padding-box;
+  }
+
+  .rpg-field:-webkit-autofill,
+  .rpg-field:-webkit-autofill:hover,
+  .rpg-field:-webkit-autofill:focus,
+  .rpg-field:-webkit-autofill:active {
+    -webkit-text-fill-color: #cbd5e1 !important;
+    caret-color: #cbd5e1;
+    border-color: rgba(50, 74, 106, 0.78) !important;
+    -webkit-box-shadow: 0 0 0 1000px rgba(23, 39, 65, 0.96) inset !important;
+    box-shadow: 0 0 0 1000px rgba(23, 39, 65, 0.96) inset !important;
+    transition:
+      background-color 999999s ease-in-out 0s,
+      color 999999s ease-in-out 0s;
+  }
+
+  .rpg-field::placeholder {
+    color: #64748b;
+    opacity: 1;
+  }
+
+  /* Prevent iOS Safari auto-zoom jumps on form focus. */
+  @supports (-webkit-touch-callout: none) {
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
   }
 }
 

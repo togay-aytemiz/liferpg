@@ -2,253 +2,174 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { completeQuest, convertToHabit, type CompleteQuestResponse } from '../lib/api';
-import type { Quest, Streak, Reward } from '../lib/database.types';
-import { Flame, Coins, Check, Sparkles, LogOut, Gift, Lock, Heart, Plus, Repeat } from 'lucide-react';
-import BottomNav from '../components/BottomNav';
+import { completeQuest, convertToHabit, rerollDailyQuest, type CompleteQuestResponse } from '../lib/api';
+import type { Quest, Streak } from '../lib/database.types';
+import { fetchQuestRuntime } from '../lib/questRuntime';
+import {
+    getDailyQuestProgress,
+    getVisibleDailyQuests,
+    xpRequiredForLevel,
+} from '../lib/gameplay';
+import { getDashboardStreakCacheKey, readCachedValue, VIEW_CACHE_TTL_MS, writeCachedValue } from '../lib/viewCache';
+import { Flame, Coins, Sparkles, Heart, Plus } from 'lucide-react';
+import DailyProgressCard from '../components/DailyProgressCard';
 import Habits from '../components/Habits';
-
-// Stat bar component
-function StatBar({ label, value, max = 100, color }: { label: string; value: number; max?: number; color: string }) {
-    const pct = Math.min((value / max) * 100, 100);
-    return (
-        <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-400 w-20 truncate">{label}</span>
-            <div className="flex-1 h-2.5 bg-slate-800 rounded-full overflow-hidden shadow-inner-panel">
-                <div className={`h-full rounded-full transition-all duration-500 ${color}`} style={{ width: `${pct}%` }} />
-            </div>
-            <span className="text-xs text-slate-500 font-mono w-8 text-right">{value}</span>
-        </div>
-    );
-}
-
-// Quest card component
-function QuestCard({ quest, isCompleted, onComplete, onMakeHabit }: {
-    quest: Quest;
-    isCompleted: boolean;
-    onComplete: (id: string) => void;
-    onMakeHabit?: (quest: Quest) => void;
-}) {
-    const [loading, setLoading] = useState(false);
-
-    const handleComplete = async () => {
-        if (isCompleted || loading) return;
-        setLoading(true);
-        await onComplete(quest.id);
-        setLoading(false);
-    };
-
-    const difficultyColors: Record<string, string> = {
-        easy: 'text-emerald-400',
-        medium: 'text-amber-400',
-        hard: 'text-red-400',
-        epic: 'text-purple-400',
-    };
-
-    return (
-        <div className={`bg-slate-800 border rounded-lg p-4 flex items-start gap-3 shadow-hud transition-all duration-300 ${isCompleted ? 'border-emerald-800/50 opacity-60' : quest.quest_type === 'boss' ? 'border-red-900/60' : 'border-slate-700'
-            }`}>
-            <button
-                onClick={handleComplete}
-                disabled={isCompleted || loading}
-                className={`w-6 h-6 rounded mt-0.5 border-2 flex items-center justify-center transition-all shrink-0 ${isCompleted
-                    ? 'bg-emerald-500 border-emerald-500'
-                    : 'bg-slate-900 border-slate-600 hover:border-amber-500'
-                    }`}
-            >
-                {loading ? (
-                    <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-                ) : isCompleted ? (
-                    <Check className="w-4 h-4 text-white" />
-                ) : null}
-            </button>
-            <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                    <p className={`font-medium text-sm ${isCompleted ? 'line-through text-slate-500' : 'text-white'}`}>
-                        {quest.title}
-                    </p>
-                    {quest.quest_type === 'boss' && <span className="text-xs">⚔️</span>}
-                    {quest.chain_step && (
-                        <span className="text-[10px] font-mono font-bold bg-slate-900/50 px-1.5 py-0.5 rounded border border-slate-700/50 text-slate-500 ml-1">
-                            {quest.chain_step}/{quest.chain_total}
-                        </span>
-                    )}
-                </div>
-                {quest.description && (
-                    <p className="text-xs text-slate-500 mt-0.5 truncate">{quest.description}</p>
-                )}
-                <div className="flex items-center gap-3 mt-1.5">
-                    <span className="text-amber-500 text-xs font-mono">+{quest.xp_reward} XP</span>
-                    <span className={`text-xs ${difficultyColors[quest.difficulty] || 'text-slate-400'}`}>
-                        {quest.difficulty}
-                    </span>
-                    {quest.stat_affected && (
-                        <span className="text-xs text-slate-500">{quest.stat_affected}</span>
-                    )}
-                </div>
-            </div>
-            {/* Actions Container */}
-            {!isCompleted && onMakeHabit && (
-                <button
-                    onClick={() => onMakeHabit(quest)}
-                    title="Make this a daily habit"
-                    className="text-slate-600 hover:text-emerald-400 transition-colors p-1 mt-0.5 shrink-0"
-                >
-                    <Repeat className="w-4 h-4" />
-                </button>
-            )}
-        </div>
-    );
-}
+import QuestCard from '../components/QuestCard';
+import { emitHabitCreated } from '../lib/habitEvents';
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const { user, profile, refreshProfile, signOut } = useAuth();
+    const { user, profile, refreshProfile } = useAuth();
     const [quests, setQuests] = useState<Quest[]>([]);
     const [completedQuestIds, setCompletedQuestIds] = useState<Set<string>>(new Set());
     const [streak, setStreak] = useState<Streak | null>(null);
-    const [nextLevelXP, setNextLevelXP] = useState(100);
     const [levelUpToast, setLevelUpToast] = useState('');
     const [achievementToast, setAchievementToast] = useState('');
     const [actionToast, setActionToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
-    const [rewards, setRewards] = useState<Reward[]>([]);
+    const [loadingId, setLoadingId] = useState<string | null>(null);
+    const [actionId, setActionId] = useState<string | null>(null);
+    const [rerollingId, setRerollingId] = useState<string | null>(null);
 
-    // Fetch data on mount
-    const fetchData = useCallback(async () => {
+    const fetchData = useCallback(async (options?: { force?: boolean }) => {
         if (!user) return;
 
-        // Fetch active quests
-        const { data: questData } = await supabase
-            .from('quests')
-            .select('*')
-            .eq('user_id', user.id)
-            .eq('is_active', true)
-            .order('quest_type');
+        const questRuntime = await fetchQuestRuntime(user.id, { force: options?.force });
+        setQuests(questRuntime.quests);
+        setCompletedQuestIds(new Set(questRuntime.completedQuestIds));
 
-        if (questData) setQuests(questData as Quest[]);
-
-        // Fetch today's completions
-        const today = new Date().toISOString().split('T')[0];
-        const { data: completions } = await supabase
-            .from('user_quests')
-            .select('quest_id')
-            .eq('user_id', user.id)
-            .eq('quest_date', today)
-            .eq('is_completed', true);
-
-        if (completions) {
-            setCompletedQuestIds(new Set(completions.map((c: { quest_id: string }) => c.quest_id)));
+        const streakCacheKey = getDashboardStreakCacheKey(user.id);
+        if (!options?.force) {
+            const cachedStreak = readCachedValue<Streak | null>(streakCacheKey);
+            if (cachedStreak.hit) {
+                setStreak(cachedStreak.value);
+                return;
+            }
         }
 
-        // Fetch streak
         const { data: streakData } = await supabase
             .from('streaks')
             .select('*')
             .eq('user_id', user.id)
             .single();
 
-        if (streakData) setStreak(streakData as Streak);
-
-        // Compute next level XP target using formula (replaces level_thresholds table)
-        const currentLevel = profile?.level ?? 1;
-        const xpForNextLevel = Math.floor(100 * Math.pow(currentLevel + 1, 1.8));
-        setNextLevelXP(xpForNextLevel);
-
-        // Fetch rewards
-        const { data: rewardData } = await supabase
-            .from('rewards')
-            .select('*')
-            .eq('user_id', user.id)
-            .order('unlock_level');
-
-        if (rewardData) setRewards(rewardData as Reward[]);
-    }, [user, profile?.level]);
+        const nextStreak = (streakData as Streak | null) ?? null;
+        setStreak(nextStreak);
+        writeCachedValue(streakCacheKey, nextStreak, VIEW_CACHE_TTL_MS);
+    }, [user]);
 
     useEffect(() => {
         fetchData();
     }, [fetchData]);
 
-    const handleCompleteQuest = async (questId: string) => {
+    const handleCompleteQuest = async (quest: Quest) => {
         try {
-            const result: CompleteQuestResponse = await completeQuest(questId);
+            setLoadingId(quest.id);
+            const result: CompleteQuestResponse = await completeQuest(quest.id);
 
-            // Update local state
-            setCompletedQuestIds(prev => new Set([...prev, questId]));
-
-            // Refresh profile for updated XP/level/stats
+            setCompletedQuestIds((prev) => new Set([...prev, quest.id]));
             await refreshProfile();
 
-            // Show toasts
             if (result.did_level_up) {
                 setLevelUpToast(`Level Up! You are now Level ${result.new_level}!`);
                 setTimeout(() => setLevelUpToast(''), 4000);
             }
+
             if (result.new_achievements.length > 0) {
                 setAchievementToast(`🏆 ${result.new_achievements.join(', ')}`);
                 setTimeout(() => setAchievementToast(''), 4000);
             }
 
-            // Refresh streak
             if (result.streak !== streak?.current_streak) {
-                setStreak(prev => prev ? { ...prev, current_streak: result.streak, xp_multiplier: result.xp_multiplier } : prev);
+                setStreak((prev) => prev ? { ...prev, current_streak: result.streak, xp_multiplier: result.xp_multiplier } : prev);
             }
 
-            // Show chain unlock toast
             if (result.chain_unlocked) {
-                setActionToast({ msg: `Next Step Unlocked: ${result.chain_unlocked}`, type: 'success' });
+                setActionToast({ msg: `+${result.xp_awarded} XP • +${result.gold_awarded} Gold. Next Step Unlocked: ${result.chain_unlocked}`, type: 'success' });
                 setTimeout(() => setActionToast(null), 4000);
+            } else {
+                setActionToast({ msg: `+${result.xp_awarded} XP • +${result.gold_awarded} Gold`, type: 'success' });
+                setTimeout(() => setActionToast(null), 3000);
             }
+
+            await fetchData({ force: true });
         } catch (err) {
             console.error('Quest completion failed:', err);
+            setActionToast({ msg: 'Failed to complete quest', type: 'error' });
+            setTimeout(() => setActionToast(null), 3000);
+        } finally {
+            setLoadingId(null);
         }
     };
 
     const handleMakeHabit = async (quest: Quest) => {
         try {
-            await convertToHabit(quest.title, quest.stat_affected);
+            setActionId(quest.id);
+            const habit = await convertToHabit(quest.title, quest.stat_affected);
+            emitHabitCreated(habit);
             setActionToast({ msg: `"${quest.title}" added to Habits!`, type: 'success' });
             setTimeout(() => setActionToast(null), 3000);
         } catch (error: any) {
-            setActionToast({ msg: error.message || "Failed to make habit", type: 'error' });
+            setActionToast({ msg: error.message || 'Failed to make habit', type: 'error' });
             setTimeout(() => setActionToast(null), 3000);
+        } finally {
+            setActionId(null);
         }
     };
 
-    const handleSignOut = async () => {
-        await signOut();
-        navigate('/auth');
+    const handleRerollDaily = async (quest: Quest) => {
+        try {
+            setRerollingId(quest.id);
+            const result = await rerollDailyQuest(quest.id);
+
+            setQuests((prev) => {
+                const withoutOldQuest = prev.filter((existingQuest) => existingQuest.id !== quest.id);
+                if (!result.new_quest) return withoutOldQuest;
+
+                return [...withoutOldQuest, result.new_quest].sort((a, b) =>
+                    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
+            });
+
+            showToast(result.message || 'Daily quest rerolled.');
+        } catch (error: any) {
+            setActionToast({ msg: error.message || 'Failed to reroll daily quest', type: 'error' });
+            setTimeout(() => setActionToast(null), 3000);
+        } finally {
+            setRerollingId(null);
+        }
     };
 
-    // Separate quests by type
-    const dailyQuests = quests.filter(q => q.quest_type === 'daily');
-    const sideQuests = quests.filter(q => q.quest_type === 'side');
-    const bossQuest = quests.find(q => q.quest_type === 'boss');
+    const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+        setActionToast({ msg, type });
+        setTimeout(() => setActionToast(null), 3000);
+    };
 
-    // XP progress calculation (formula-based infinite levels)
+    const visibleDailyQuests = getVisibleDailyQuests(quests);
+    const dailyProgress = getDailyQuestProgress(visibleDailyQuests, completedQuestIds);
+
     const currentXP = profile?.xp ?? 0;
     const currentLevel = profile?.level ?? 1;
-    const prevLevelXP = Math.floor(100 * Math.pow(currentLevel, 1.8));
+    const nextLevelXP = xpRequiredForLevel(currentLevel + 1);
+    const prevLevelXP = currentLevel <= 1 ? 0 : xpRequiredForLevel(currentLevel);
     const xpInLevel = currentXP - prevLevelXP;
     const xpNeeded = nextLevelXP - prevLevelXP;
-    const xpPercent = Math.min((xpInLevel / Math.max(xpNeeded, 1)) * 100, 100);
+    const xpPercent = Math.max(0, Math.min((xpInLevel / Math.max(xpNeeded, 1)) * 100, 100));
 
     return (
         <div className="flex-1 flex flex-col animate-in fade-in duration-500 bg-slate-900 overflow-hidden relative">
-
-            {/* Toast: Level Up */}
             {levelUpToast && (
                 <div className="absolute top-4 left-4 right-4 z-50 bg-amber-500 text-slate-900 font-heading font-bold text-center py-3 px-4 rounded-lg shadow-glow-gold animate-in slide-in-from-top duration-300">
                     <Sparkles className="w-5 h-5 inline mr-2" />
                     {levelUpToast}
                 </div>
             )}
-            {/* Toast: Achievement */}
+
             {achievementToast && (
                 <div className="absolute top-16 left-4 right-4 z-50 bg-emerald-600 text-white font-heading text-center py-3 px-4 rounded-lg shadow-glow-emerald animate-in slide-in-from-top duration-300 text-sm">
                     {achievementToast}
                 </div>
             )}
-            {/* Toast: Action */}
+
             {actionToast && (
                 <div className={`absolute top-4 left-4 right-4 z-50 px-4 py-3 rounded-lg text-sm text-center shadow-lg animate-in slide-in-from-top-2 duration-200 ${actionToast.type === 'error'
                     ? 'bg-red-900/90 border border-red-800 text-red-100 shadow-glow-red'
@@ -258,25 +179,43 @@ export default function Dashboard() {
                 </div>
             )}
 
-            <div className="flex-1 overflow-y-auto pb-24 px-4 pt-6 space-y-6">
-
-                {/* Character Card */}
+            <div className="flex-1 overflow-y-auto px-4 pt-6 pb-[calc(8rem+env(safe-area-inset-bottom))] space-y-6">
                 <div className="bg-slate-800 border border-slate-700 rounded-lg p-5 shadow-hud">
-                    <div className="flex items-center gap-4 mb-4">
+                    <div className="flex items-start gap-4">
                         <div className="w-14 h-14 rounded-full bg-slate-700 border-2 border-amber-500/40 flex items-center justify-center shrink-0 shadow-glow-gold">
                             <span className="text-2xl">🧙‍♂️</span>
                         </div>
-                        <div className="flex-1">
-                            <h1 className="font-heading text-xl text-white">{profile?.username || 'Hero'}</h1>
-                            <p className="text-amber-500 font-heading text-sm">Level {currentLevel}</p>
+
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <h1 className="font-heading text-xl text-white truncate">{profile?.username || 'Hero'}</h1>
+                                    <p className="mt-1 text-amber-500 font-heading text-sm">Level {currentLevel}</p>
+                                    {streak && streak.xp_multiplier > 1 && (
+                                        <span className="mt-2 inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] font-mono text-emerald-300">
+                                            x{streak.xp_multiplier} XP
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-1 text-[11px] font-mono text-orange-300">
+                                        <Flame className="w-3 h-3 text-orange-400" />
+                                        {streak?.current_streak ?? 0}
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[11px] font-mono text-amber-300">
+                                        <Coins className="w-3 h-3 text-amber-400" />
+                                        {profile?.gold ?? 0}
+                                    </span>
+                                </div>
+                            </div>
+                            <p className="mt-2 text-[11px] text-slate-500">
+                                Earn gold from quests. Spend it in Bazaar rewards and magical goods.
+                            </p>
                         </div>
-                        <button onClick={handleSignOut} className="text-slate-500 hover:text-slate-300 transition-colors p-2">
-                            <LogOut className="w-5 h-5" />
-                        </button>
                     </div>
 
-                    {/* XP Bar */}
-                    <div className="space-y-1">
+                    <div className="space-y-1 mt-4">
                         <div className="flex justify-between text-xs">
                             <span className="text-slate-400">XP</span>
                             <span className="text-amber-500 font-mono">{currentXP} / {nextLevelXP}</span>
@@ -289,7 +228,6 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* HP Bar */}
                     <div className="space-y-1 mt-3">
                         <div className="flex justify-between text-xs">
                             <span className="text-slate-400 flex items-center gap-1"><Heart className="w-3 h-3 text-red-500" fill="currentColor" /> HP</span>
@@ -302,146 +240,56 @@ export default function Dashboard() {
                             />
                         </div>
                     </div>
-
-                    {/* Quick Stats Row */}
-                    <div className="flex items-center gap-4 mt-4">
-                        <div className="flex items-center gap-1.5 text-sm">
-                            <Flame className="w-4 h-4 text-orange-500" />
-                            <span className="text-slate-300 font-mono">{streak?.current_streak ?? 0}</span>
-                            <span className="text-slate-500 text-xs">day streak</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-sm">
-                            <Coins className="w-4 h-4 text-yellow-500" />
-                            <span className="text-slate-300 font-mono">{profile?.gold ?? 0}</span>
-                        </div>
-                        {streak && streak.xp_multiplier > 1 && (
-                            <span className="text-emerald-400 text-xs font-mono">×{streak.xp_multiplier} XP</span>
-                        )}
-                    </div>
                 </div>
 
-                {/* Daily Quests */}
-                {dailyQuests.length > 0 && (
+                <DailyProgressCard
+                    completed={dailyProgress.completed}
+                    total={dailyProgress.total}
+                />
+
+                {visibleDailyQuests.length > 0 && (
                     <div>
                         <div className="flex items-center justify-between mb-3">
-                            <h2 className="font-heading text-lg text-slate-300">Daily Quests</h2>
+                            <div>
+                                <h2 className="font-heading text-lg text-slate-300">Today's Dailies</h2>
+                                <p className="text-xs text-slate-500">Only the active focus set lives here. More rotate in later.</p>
+                            </div>
                             <button
                                 onClick={() => navigate('/quests')}
                                 className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                                title="Open full quest screen"
                             >
                                 <Plus className="w-4 h-4" />
                             </button>
                         </div>
                         <div className="space-y-2.5">
-                            {dailyQuests.map(q => (
+                            {visibleDailyQuests.map((quest) => (
                                 <QuestCard
-                                    key={q.id}
-                                    quest={q}
-                                    isCompleted={completedQuestIds.has(q.id)}
+                                    key={quest.id}
+                                    quest={quest}
+                                    isCompleted={completedQuestIds.has(quest.id)}
+                                    isCompleting={loadingId === quest.id}
+                                    isActionLoading={actionId === quest.id || rerollingId === quest.id}
                                     onComplete={handleCompleteQuest}
                                     onMakeHabit={handleMakeHabit}
+                                    onRerollDaily={handleRerollDaily}
+                                    disableActions={!!loadingId || !!actionId || !!rerollingId}
                                 />
                             ))}
                         </div>
                     </div>
                 )}
 
-                {/* Boss Quest */}
-                {bossQuest && (
-                    <div>
-                        <h2 className="font-heading text-lg text-red-400 mb-3">⚔ Weekly Boss</h2>
-                        <QuestCard
-                            quest={bossQuest}
-                            isCompleted={completedQuestIds.has(bossQuest.id)}
-                            onComplete={handleCompleteQuest}
-                        />
-                    </div>
-                )}
-
-                {/* Side Quests */}
-                {sideQuests.length > 0 && (
-                    <div>
-                        <h2 className="font-heading text-lg text-slate-400 mb-3">Side Quests</h2>
-                        <div className="space-y-2.5">
-                            {sideQuests.map(q => (
-                                <QuestCard
-                                    key={q.id}
-                                    quest={q}
-                                    isCompleted={completedQuestIds.has(q.id)}
-                                    onComplete={handleCompleteQuest}
-                                    onMakeHabit={handleMakeHabit}
-                                />
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Character Stats */}
-                <div>
-                    <h2 className="font-heading text-lg text-slate-300 mb-3">Character Stats</h2>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-3 shadow-hud">
-                        <StatBar label="Strength" value={profile?.stat_strength ?? 0} color="bg-red-500" />
-                        <StatBar label="Knowledge" value={profile?.stat_knowledge ?? 0} color="bg-blue-500" />
-                        <StatBar label="Wealth" value={profile?.stat_wealth ?? 0} color="bg-yellow-500" />
-                        <StatBar label="Adventure" value={profile?.stat_adventure ?? 0} color="bg-purple-500" />
-                        <StatBar label="Social" value={profile?.stat_social ?? 0} color="bg-pink-500" />
-                    </div>
-                </div>
-
-                {/* Rewards (Milestone) */}
-                {rewards.length > 0 && (
-                    <div>
-                        <h2 className="font-heading text-lg text-amber-400 mb-3 flex items-center gap-2">
-                            <Gift className="w-5 h-5" /> Milestone Rewards
-                        </h2>
-                        <div className="space-y-2">
-                            {rewards.map(r => {
-                                const unlocked = currentLevel >= r.unlock_level;
-                                return (
-                                    <div key={r.id} className={`bg-slate-800 border rounded-lg p-4 flex items-center gap-3 transition-all duration-300 ${r.is_redeemed ? 'border-emerald-800/40 opacity-50' : unlocked ? 'border-amber-500/40 shadow-glow-gold' : 'border-slate-700/50 opacity-70'
-                                        }`}>
-                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${r.is_redeemed ? 'bg-emerald-900/50' : unlocked ? 'bg-amber-500/20' : 'bg-slate-700'
-                                            }`}>
-                                            {r.is_redeemed ? (
-                                                <Check className="w-5 h-5 text-emerald-400" />
-                                            ) : unlocked ? (
-                                                <Gift className="w-5 h-5 text-amber-500" />
-                                            ) : (
-                                                <Lock className="w-5 h-5 text-slate-500" />
-                                            )}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className={`text-sm font-medium ${r.is_redeemed ? 'line-through text-slate-500' : unlocked ? 'text-white' : 'text-slate-400'
-                                                }`}>{r.title}</p>
-                                            {r.description && (
-                                                <p className="text-xs text-slate-500 mt-0.5 truncate">{r.description}</p>
-                                            )}
-                                        </div>
-                                        <span className={`text-xs font-heading ${unlocked ? 'text-amber-500' : 'text-slate-600'
-                                            }`}>Lv.{r.unlock_level}</span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-
-                {/* Habits Section */}
                 <div className="pt-2 border-t border-slate-800">
                     <Habits />
                 </div>
 
-                {/* Empty state (Quests only) */}
                 {quests.length === 0 && (
                     <div className="text-center py-12">
                         <p className="text-slate-500 text-sm">No quests yet. Complete onboarding to generate your quests!</p>
                     </div>
                 )}
             </div>
-
-            {/* Bottom HUD Navigation */}
-            <BottomNav />
-
         </div>
     );
 }

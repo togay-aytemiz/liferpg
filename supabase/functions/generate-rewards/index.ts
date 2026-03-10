@@ -14,6 +14,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callOpenAI, validateRewardResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 
+const PROFILE_SYNC_GRACE_MS = 2_000;
+
 const SYSTEM_PROMPT = `You are a reward designer for LifeRPG, a gamified productivity app.
 
 Your job is to generate personalized REAL-LIFE rewards that the user can treat themselves to when they reach certain levels.
@@ -58,6 +60,7 @@ serve(async (req) => {
     }
 
     try {
+        const { force_regenerate = false } = await req.json().catch(() => ({}));
         const authHeader = req.headers.get("Authorization");
         if (!authHeader) {
             return new Response(
@@ -88,6 +91,36 @@ serve(async (req) => {
                 JSON.stringify({ error: "No life rhythm found. Complete onboarding first." }),
                 { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
+        }
+
+        if (!force_regenerate) {
+            const profileUpdatedAtMs = profile?.updated_at
+                ? new Date(profile.updated_at).getTime()
+                : 0;
+
+            const { data: existingRewards, error: existingRewardsError } = await supabase
+                .from("rewards")
+                .select("*")
+                .eq("user_id", user.id)
+                .order("unlock_level", { ascending: true });
+
+            if (existingRewardsError) {
+                console.warn("Failed to read existing rewards before generation:", existingRewardsError.message);
+            } else if ((existingRewards?.length ?? 0) >= 6) {
+                const latestRewardCreatedAt = Math.max(
+                    ...existingRewards!.map((reward) => new Date(reward.created_at).getTime())
+                );
+                const rewardsMatchCurrentProfile = latestRewardCreatedAt >= (profileUpdatedAtMs - PROFILE_SYNC_GRACE_MS);
+
+                if (!rewardsMatchCurrentProfile) {
+                    // fall through to regenerate based on the newer profile snapshot
+                } else {
+                    return new Response(
+                        JSON.stringify({ success: true, rewards: existingRewards, reused_existing: true }),
+                        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                    );
+                }
+            }
         }
 
         const likesText = profile?.likes ? `\nLikes: ${profile.likes}` : "";

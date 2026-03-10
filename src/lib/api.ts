@@ -1,8 +1,16 @@
 // Frontend API service for calling Supabase Edge Functions.
 // All AI-related calls go through here.
 
-import { supabase } from './supabase';
-import type { Quest, ShopItem } from './database.types';
+import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
+import type { Habit, Quest, ShopItem } from './database.types';
+import { invalidateQuestRuntime } from './questRuntime';
+import {
+    getAwardsCacheKey,
+    getDashboardStreakCacheKey,
+    getHabitsCacheKey,
+    getShopCacheKey,
+    invalidateCachedValue,
+} from './viewCache';
 
 interface GenerateQuestsResponse {
     success: boolean;
@@ -15,30 +23,158 @@ interface GenerateQuestsResponse {
     };
 }
 
+type EdgeJsonBody = Record<string, any> | undefined;
+
+interface ParsedEdgeResponse {
+    contentType: string;
+    data: unknown;
+    message: string | null;
+}
+
+const EDGE_FUNCTIONS_BASE_URL = `${supabaseUrl.replace(/\/$/, '')}/functions/v1`;
+
+function isUnauthorizedStatus(status: number, message: string | null): boolean {
+    if (status === 401) return true;
+    return /(^|\W)401(\W|$)|unauthorized|missing authorization/i.test(message ?? '');
+}
+
+async function parseEdgeResponse(response: Response): Promise<ParsedEdgeResponse> {
+    const contentType = (response.headers.get('content-type') ?? '').split(';')[0].trim();
+
+    if (response.status === 204) {
+        return { contentType, data: null, message: null };
+    }
+
+    if (contentType === 'application/json') {
+        const json = await response.json().catch(() => null);
+        const payload = json as { message?: string; error?: string } | null;
+        return {
+            contentType,
+            data: json,
+            message: payload?.message ?? payload?.error ?? null,
+        };
+    }
+
+    const text = await response.text().catch(() => '');
+    return {
+        contentType,
+        data: text,
+        message: text || null,
+    };
+}
+
+async function isAccessTokenValid(accessToken: string): Promise<boolean> {
+    const { data, error } = await supabase.auth.getUser(accessToken);
+    return !error && !!data.user;
+}
+
+async function getValidAccessToken(): Promise<string> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const expiresSoon = session?.expires_at
+        ? (session.expires_at * 1000) <= (Date.now() + 30_000)
+        : false;
+
+    if (session?.access_token && !expiresSoon && await isAccessTokenValid(session.access_token)) {
+        return session.access_token;
+    }
+
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error || !data.session?.access_token) {
+        throw new Error('Session expired. Please sign in again.');
+    }
+
+    const refreshedTokenIsValid = await isAccessTokenValid(data.session.access_token);
+    if (!refreshedTokenIsValid) {
+        throw new Error('Session expired. Please sign in again.');
+    }
+
+    return data.session.access_token;
+}
+
+async function getValidUser() {
+    const accessToken = await getValidAccessToken();
+    const { data, error } = await supabase.auth.getUser(accessToken);
+    if (error || !data.user) {
+        throw new Error('Session expired. Please sign in again.');
+    }
+
+    return { accessToken, user: data.user };
+}
+
+async function getSessionUserId(): Promise<string | null> {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.user.id ?? null;
+}
+
+async function postEdgeFunction(
+    name: string,
+    accessToken: string,
+    body: EdgeJsonBody
+) {
+    return fetch(`${EDGE_FUNCTIONS_BASE_URL}/${name}`, {
+        method: 'POST',
+        headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body ?? {}),
+    });
+}
+
+async function invokeEdgeFunction<T>(
+    name: string,
+    body: EdgeJsonBody,
+    fallbackError: string
+): Promise<T> {
+    let accessToken = await getValidAccessToken();
+    let response = await postEdgeFunction(name, accessToken, body);
+    let parsed = await parseEdgeResponse(response);
+
+    if (isUnauthorizedStatus(response.status, parsed.message)) {
+        const { data, error } = await supabase.auth.refreshSession();
+        if (error || !data.session?.access_token) {
+            throw new Error('Session expired. Please sign in again.');
+        }
+
+        accessToken = data.session.access_token;
+        response = await postEdgeFunction(name, accessToken, body);
+        parsed = await parseEdgeResponse(response);
+
+        if (isUnauthorizedStatus(response.status, parsed.message)) {
+            throw new Error(parsed.message || 'Session expired. Please sign in again.');
+        }
+    }
+
+    if (!response.ok) {
+        throw new Error(parsed.message || fallbackError);
+    }
+
+    return parsed.data as T;
+}
+
 /**
  * Call the generate-quests Edge Function.
  * Used after onboarding when user submits their life rhythm for the first time.
  */
 export async function generateQuests(lifeRhythm: string): Promise<GenerateQuestsResponse> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
+    const { user } = await getValidUser();
 
     // Fetch active habits context
     const { data: activeHabits } = await supabase
         .from('habits')
         .select('title, frequency')
-        .eq('user_id', session.user.id)
+        .eq('user_id', user.id)
         .eq('is_active', true);
 
-    const response = await supabase.functions.invoke('generate-quests', {
-        body: { life_rhythm: lifeRhythm, active_habits: activeHabits || [] },
-    });
+    const response = await invokeEdgeFunction<GenerateQuestsResponse>(
+        'generate-quests',
+        { life_rhythm: lifeRhythm, active_habits: activeHabits || [] },
+        'Failed to generate quests'
+    );
 
-    if (response.error) {
-        throw new Error(response.error.message || 'Failed to generate quests');
-    }
-
-    return response.data as GenerateQuestsResponse;
+    invalidateQuestRuntime(user.id);
+    return response;
 }
 
 /**
@@ -47,25 +183,23 @@ export async function generateQuests(lifeRhythm: string): Promise<GenerateQuests
  * Deactivates old AI quests and generates new ones.
  */
 export async function regenerateQuests(lifeRhythm: string): Promise<GenerateQuestsResponse> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
+    const { user } = await getValidUser();
 
     // Fetch active habits context
     const { data: activeHabits } = await supabase
         .from('habits')
         .select('title, frequency')
-        .eq('user_id', session.user.id)
+        .eq('user_id', user.id)
         .eq('is_active', true);
 
-    const response = await supabase.functions.invoke('regenerate-quests', {
-        body: { life_rhythm: lifeRhythm, active_habits: activeHabits || [] },
-    });
+    const response = await invokeEdgeFunction<GenerateQuestsResponse>(
+        'regenerate-quests',
+        { life_rhythm: lifeRhythm, active_habits: activeHabits || [] },
+        'Failed to regenerate quests'
+    );
 
-    if (response.error) {
-        throw new Error(response.error.message || 'Failed to regenerate quests');
-    }
-
-    return response.data as GenerateQuestsResponse;
+    invalidateQuestRuntime(user.id);
+    return response;
 }
 
 export interface CompleteQuestResponse {
@@ -88,37 +222,33 @@ export interface CompleteQuestResponse {
  * Handles XP award, level up, stat increase, streak, and achievements.
  */
 export async function completeQuest(questId: string): Promise<CompleteQuestResponse> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
+    const response = await invokeEdgeFunction<CompleteQuestResponse>(
+        'complete-quest',
+        { quest_id: questId },
+        'Failed to complete quest'
+    );
 
-    const response = await supabase.functions.invoke('complete-quest', {
-        body: { quest_id: questId },
-    });
-
-    if (response.error) {
-        throw new Error(response.error.message || 'Failed to complete quest');
+    const userId = await getSessionUserId();
+    if (userId) {
+        invalidateQuestRuntime(userId);
+        invalidateCachedValue(getDashboardStreakCacheKey(userId));
+        invalidateCachedValue(getAwardsCacheKey(userId));
+        invalidateCachedValue(getShopCacheKey(userId));
     }
 
-    return response.data as CompleteQuestResponse;
+    return response;
 }
 
 /**
  * Call the generate-rewards Edge Function.
  * LLM decides personalized real-life rewards based on user's profile.
  */
-export async function generateRewards(): Promise<{ success: boolean; rewards: Array<Record<string, unknown>> }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
-
-    const response = await supabase.functions.invoke('generate-rewards', {
-        body: {},
-    });
-
-    if (response.error) {
-        throw new Error(response.error.message || 'Failed to generate rewards');
-    }
-
-    return response.data as { success: boolean; rewards: Array<Record<string, unknown>> };
+export async function generateRewards(forceRegenerate = false): Promise<{ success: boolean; rewards: Array<Record<string, unknown>> }> {
+    return invokeEdgeFunction<{ success: boolean; rewards: Array<Record<string, unknown>> }>(
+        'generate-rewards',
+        { force_regenerate: forceRegenerate },
+        'Failed to generate rewards'
+    );
 }
 
 /**
@@ -127,37 +257,44 @@ export async function generateRewards(): Promise<{ success: boolean; rewards: Ar
  * Returns the replaced quest to immediately inject into the UI.
  */
 export async function skipQuest(questId: string, reason: string): Promise<{ success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string; hp_lost: number; died: boolean; gold_lost: number; current_hp: number }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
-
-    const response = await supabase.functions.invoke('skip-quest', {
-        body: { quest_id: questId, reason },
-    });
-
-    if (response.error) {
-        // Attempt to extract the custom message if the limit was reached
-        if (response.error.context && typeof response.error.context === 'object') {
-            const errorData = response.error.context as any;
-            if (errorData?.body) {
-                try {
-                    const parsed = JSON.parse(errorData.body);
-                    if (parsed.message) throw new Error(parsed.message);
-                } catch {
-                    // ignore parse errors
-                }
-            }
-        }
-
-        // Fallback standard error extraction (Supabase functions sometimes wrap errors differently depending on the client version)
-        throw new Error(response.error.message || 'Failed to skip quest');
-    }
+    const data = await invokeEdgeFunction<{ success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string; hp_lost: number; died: boolean; gold_lost: number; current_hp: number }>(
+        'skip-quest',
+        { quest_id: questId, reason },
+        'Failed to skip quest'
+    );
 
     // Double check if Edge function returned a 400/429 without throwing 'response.error' but mapped differently (depends on library version)
-    if (response.data && response.data.error && response.data.message) {
-        throw new Error(response.data.message);
+    if ((data as any)?.error && (data as any)?.message) {
+        throw new Error((data as any).message);
     }
 
-    return response.data as { success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string; hp_lost: number; died: boolean; gold_lost: number; current_hp: number };
+    const userId = await getSessionUserId();
+    if (userId) {
+        invalidateQuestRuntime(userId);
+        invalidateCachedValue(getShopCacheKey(userId));
+        invalidateCachedValue(getDashboardStreakCacheKey(userId));
+    }
+
+    return data;
+}
+
+export async function regenerateQuest(questId: string, reason: string): Promise<{ success: boolean; skipped_quest: string; remaining_skips: number; max_skips: number; new_quest: Quest | null; message: string; hp_lost: number; died: boolean; gold_lost: number; current_hp: number }> {
+    return skipQuest(questId, reason);
+}
+
+export async function rerollDailyQuest(questId: string): Promise<{ success: boolean; rerolled_quest: string; new_quest: Quest | null; message: string }> {
+    const response = await invokeEdgeFunction<{ success: boolean; rerolled_quest: string; new_quest: Quest | null; message: string }>(
+        'skip-quest',
+        { quest_id: questId, mode: 'reroll' },
+        'Failed to reroll daily quest'
+    );
+
+    const userId = await getSessionUserId();
+    if (userId) {
+        invalidateQuestRuntime(userId);
+    }
+
+    return response;
 }
 
 /**
@@ -165,18 +302,18 @@ export async function skipQuest(questId: string, reason: string): Promise<{ succ
  * Sends a custom prompt to the AI to evaluate and create a personalized user quest (or avoidance goal).
  */
 export async function createCustomQuest(prompt: string, questType: 'daily' | 'side'): Promise<{ success: boolean; message: string; quest: Quest }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
+    const response = await invokeEdgeFunction<{ success: boolean; message: string; quest: Quest }>(
+        'create-custom-quest',
+        { prompt, quest_type: questType },
+        'Failed to create custom quest'
+    );
 
-    const response = await supabase.functions.invoke('create-custom-quest', {
-        body: { prompt, quest_type: questType },
-    });
-
-    if (response.error) {
-        throw new Error(response.error.message || 'Failed to create custom quest');
+    const userId = await getSessionUserId();
+    if (userId) {
+        invalidateQuestRuntime(userId);
     }
 
-    return response.data as { success: boolean; message: string; quest: Quest };
+    return response;
 }
 
 /**
@@ -184,22 +321,22 @@ export async function createCustomQuest(prompt: string, questType: 'daily' | 'si
  * Spends user gold to purchase items like Health Potions, XP Scrolls, or Streak Freezes.
  */
 export async function buyItem(itemId: string): Promise<{ success: boolean; message: string; updates: any }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
+    const data = await invokeEdgeFunction<{ success: boolean; message: string; updates: any; error?: string }>(
+        'buy-item',
+        { item_id: itemId },
+        'Failed to buy item'
+    );
 
-    const response = await supabase.functions.invoke('buy-item', {
-        body: { item_id: itemId },
-    });
-
-    if (response.error) {
-        throw new Error(response.error.message || 'Failed to buy item');
+    if (data.error) {
+        throw new Error(data.error);
     }
 
-    if (response.data && response.data.error) {
-        throw new Error(response.data.error);
+    const userId = await getSessionUserId();
+    if (userId) {
+        invalidateCachedValue(getShopCacheKey(userId));
     }
 
-    return response.data as { success: boolean; message: string; updates: any };
+    return data;
 }
 
 /**
@@ -218,29 +355,51 @@ export async function logHabit(habitId: string): Promise<any> {
         throw new Error(error.message || 'Failed to log habit');
     }
 
+    invalidateCachedValue(getAwardsCacheKey(session.user.id));
+    invalidateCachedValue(getShopCacheKey(session.user.id));
+    invalidateCachedValue(getDashboardStreakCacheKey(session.user.id));
+
     return data;
 }
 
 /**
  * Converts a quest into a persistent Good Habit.
  */
-export async function convertToHabit(questTitle: string, statAffected?: string | null, frequency: 'daily' | 'weekly' | 'monthly' = 'daily'): Promise<void> {
+export async function convertToHabit(questTitle: string, statAffected?: string | null, frequency: 'daily' | 'weekly' | 'monthly' = 'daily'): Promise<Habit> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Not authenticated');
 
-    const { error } = await supabase
+    const normalizedTitle = questTitle.trim();
+    const { data: existingHabit } = await supabase
+        .from('habits')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('title', normalizedTitle)
+        .eq('is_active', true)
+        .maybeSingle();
+
+    if (existingHabit) {
+        return existingHabit as Habit;
+    }
+
+    const { data: insertedHabit, error } = await supabase
         .from('habits')
         .insert({
             user_id: session.user.id,
-            title: questTitle,
+            title: normalizedTitle,
             is_good: true,
             stat_affected: statAffected || 'strength',
             frequency: frequency,
-        } as any);
+        } as any)
+        .select()
+        .single();
 
-    if (error) {
+    if (error || !insertedHabit) {
         throw new Error(error.message || 'Failed to convert to habit');
     }
+
+    invalidateCachedValue(getHabitsCacheKey(session.user.id));
+    return insertedHabit as Habit;
 }
 
 /**
@@ -248,18 +407,18 @@ export async function convertToHabit(questTitle: string, statAffected?: string |
  * AI designs personalized real-life rewards (expires in 7 days).
  */
 export async function generateShopItems(): Promise<{ success: boolean; items: ShopItem[] }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
+    const response = await invokeEdgeFunction<{ success: boolean; items: ShopItem[] }>(
+        'generate-shop',
+        {},
+        'Failed to generate shop items'
+    );
 
-    const response = await supabase.functions.invoke('generate-shop', {
-        body: {},
-    });
-
-    if (response.error) {
-        throw new Error(response.error.message || 'Failed to generate shop items');
+    const userId = await getSessionUserId();
+    if (userId) {
+        invalidateCachedValue(getShopCacheKey(userId));
     }
 
-    return response.data as { success: boolean; items: ShopItem[] };
+    return response;
 }
 
 /**
@@ -318,5 +477,6 @@ export async function purchaseShopItem(itemId: string): Promise<{ success: boole
         throw new Error('Failed to mark item as purchased');
     }
 
+    invalidateCachedValue(getShopCacheKey(session.user.id));
     return { success: true, item: purchasedItem as ShopItem };
 }

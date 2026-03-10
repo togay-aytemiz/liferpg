@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Sword, Mail, Lock, UserPlus, LogIn, Eye, EyeOff } from 'lucide-react';
+import { RPG_AUTH_INPUT_CLASS } from '../lib/formStyles';
 
 export default function Auth() {
-    const navigate = useNavigate();
     const { signIn, signUp } = useAuth();
 
     const [isLogin, setIsLogin] = useState(true);
@@ -28,9 +27,7 @@ export default function Auth() {
             if (authError) {
                 setError(authError.message);
             } else {
-                if (isLogin) {
-                    navigate('/onboarding');
-                } else {
+                if (!isLogin) {
                     setIsSubmitted(true);
                 }
             }
@@ -49,7 +46,10 @@ export default function Auth() {
                 <div className="inline-flex items-center justify-center w-12 h-12 flex-shrink-0 sm:w-20 sm:h-20 rounded-full bg-slate-800 border-2 border-amber-500/40 shadow-glow-gold mb-1 sm:mb-4">
                     <Sword className="w-6 h-6 sm:w-10 sm:h-10 text-amber-500" />
                 </div>
-                <h1 className="font-heading text-3xl sm:text-4xl text-amber-500 tracking-wider mb-0.5">lifeRPG</h1>
+                <h1 className="font-heading text-3xl sm:text-4xl text-amber-500 tracking-wider mb-0.5">
+                    <span className="font-medium">LIFE</span>
+                    <span className="font-bold">RPG</span>
+                </h1>
                 <p className="text-slate-500 text-xs sm:text-sm">Turn your life into a quest.</p>
             </div>
 
@@ -110,8 +110,9 @@ export default function Auth() {
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 placeholder="Email address"
+                                autoComplete="username"
                                 required
-                                className="w-full pl-10 sm:pl-12 pr-4 py-2.5 sm:py-3.5 bg-slate-800/80 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner-panel text-base"
+                                className={`${RPG_AUTH_INPUT_CLASS} pl-10 sm:pl-12 pr-4`}
                             />
                         </div>
 
@@ -123,9 +124,10 @@ export default function Auth() {
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="Password"
+                                autoComplete={isLogin ? "current-password" : "new-password"}
                                 required
                                 minLength={6}
-                                className="w-full pl-10 sm:pl-12 pr-12 py-2.5 sm:py-3.5 bg-slate-800/80 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner-panel text-base"
+                                className={`${RPG_AUTH_INPUT_CLASS} pl-10 sm:pl-12 pr-12`}
                             />
                             <button
                                 type="button"

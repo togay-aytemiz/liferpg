@@ -90,6 +90,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (user) await fetchProfile(user.id);
     };
 
+    const validateSession = async (candidate: Session | null): Promise<{ session: Session; user: User } | null> => {
+        if (!candidate?.access_token) return null;
+
+        const { data, error } = await supabase.auth.getUser(candidate.access_token);
+        if (error || !data.user) {
+            return null;
+        }
+
+        return {
+            session: candidate,
+            user: data.user,
+        };
+    };
+
+    const resolveValidatedSession = async (candidate: Session | null): Promise<{ session: Session; user: User } | null> => {
+        const validated = await validateSession(candidate);
+        if (validated) return validated;
+
+        if (!candidate?.refresh_token) {
+            return null;
+        }
+
+        const refreshResult = await supabase.auth.refreshSession({
+            refresh_token: candidate.refresh_token,
+        });
+
+        if (refreshResult.error || !refreshResult.data.session) {
+            return null;
+        }
+
+        return validateSession(refreshResult.data.session);
+    };
+
+    const persistValidatedSession = async (candidate: Session | null): Promise<{ session: Session; user: User } | null> => {
+        if (!candidate?.access_token || !candidate.refresh_token) {
+            return null;
+        }
+
+        const setSessionResult = await supabase.auth.setSession({
+            access_token: candidate.access_token,
+            refresh_token: candidate.refresh_token,
+        });
+
+        if (setSessionResult.error) {
+            return null;
+        }
+
+        return resolveValidatedSession(setSessionResult.data.session ?? candidate);
+    };
+
     useEffect(() => {
         let mounted = true;
 
@@ -117,11 +167,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     console.error('Error getting initial session:', error);
                 }
 
+                const validated = await resolveValidatedSession(session);
+
                 if (mounted) {
-                    setSession(session);
-                    setUser(session?.user ?? null);
-                    if (session?.user) {
-                        await fetchProfile(session.user.id);
+                    setSession(validated?.session ?? null);
+                    setUser(validated?.user ?? null);
+                    if (validated?.user) {
+                        await fetchProfile(validated.user.id);
                     } else {
                         profileFetchIdRef.current += 1;
                         setProfile(null);
@@ -138,7 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            (_event, session) => {
+            (event, session) => {
                 if (!mounted) return;
 
                 setSession(session);
@@ -148,6 +200,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     profileFetchIdRef.current += 1;
                     setProfile(null);
                     setLoading(false);
+                    return;
+                }
+
+                // Token refresh can fire frequently; avoid toggling global loading
+                // and remounting active routes (e.g., /generating).
+                if (event === 'TOKEN_REFRESHED') {
                     return;
                 }
 
@@ -182,8 +240,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const signIn = async (email: string, password: string) => {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        return { error: error as Error | null };
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+            return { error: error as Error | null };
+        }
+
+        const validated = await persistValidatedSession(data.session) ?? await resolveValidatedSession(data.session);
+
+        if (!validated) {
+            return { error: new Error('Sign-in succeeded but session validation failed. Please try again.') };
+        }
+
+        setSession(validated.session);
+        setUser(validated.user);
+        await fetchProfile(validated.user.id);
+        setLoading(false);
+
+        return { error: null };
     };
 
     const signOut = async () => {

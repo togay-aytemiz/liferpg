@@ -13,6 +13,20 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callOpenAI, validateQuestResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
+
+const RECENT_BATCH_WINDOW_MS = 60_000;
+const MIN_GENERATED_BATCH_SIZE = 7;
+const PROFILE_SYNC_GRACE_MS = 2_000;
+const DAILY_POOL_LIMIT = 7;
+const SIDE_QUEST_LIMIT = 2;
+const CHAIN_QUEST_LIMIT = 3;
+
+function getActiveDailyLimit(poolSize: number): number {
+    if (poolSize <= 0) return 0;
+    if (poolSize <= 3) return poolSize;
+    return Math.min(Math.max(poolSize - 2, 3), 5);
+}
 
 const SYSTEM_PROMPT = `You are a game master for LifeRPG, a gamified productivity app.
 
@@ -65,15 +79,19 @@ You MUST return valid JSON with this exact structure:
 }
 
 Rules:
-- Generate 4-6 daily quests based on the user's routine
-- Generate 2-3 fun side quests for variety
+- Generate 5-7 daily quests as a SMALL weekly pool based on the user's routine
+- The first daily quests in the array should be the best fit for TODAY; later ones should feel like alternate dailies for the next few days
+- Generate 1-2 fun side quests for variety
 - Generate 1 boss quest as a weekly challenge
 - Generate 2-3 chain_quests that form a QUEST CHAIN with the boss quest:
   - Each chain quest is a progressively harder continuation of the boss quest
   - Think of it as chapters in a story: Step 1 (boss_quest) → Step 2 → Step 3 → Step 4
+  - The boss_quest is the ONLY current weekly boss the user should see right away
+  - chain_quests are FUTURE weekly chapters, not simultaneous active bosses
   - Each step should escalate in difficulty and ambition
   - Example: "Run 2km" → "Run 5km" → "Run 10km race"
   - Chain quests start LOCKED (inactive) and unlock as the user completes each step
+- Keep the user's ACTIVE list small and game-like. Do not create an overwhelming wall of chores.
 - Match activities to the correct stat category:
   - Exercise/fitness → strength
   - Reading/learning/studying → knowledge
@@ -123,12 +141,66 @@ serve(async (req) => {
             );
         }
 
-        // Fetch preferences from profile
+        // Fetch preferences/profile snapshot first so we can decide whether a recent quest
+        // batch still matches the user's current onboarding state.
         const { data: profile } = await supabase
             .from("profiles")
-            .select("likes, dislikes, focus_areas")
+            .select("likes, dislikes, focus_areas, updated_at")
             .eq("id", user.id)
             .single();
+
+        const profileUpdatedAtMs = profile?.updated_at
+            ? new Date(profile.updated_at).getTime()
+            : 0;
+
+        // Reuse the latest generated onboarding batch to avoid duplicate OpenAI cost
+        // when the loading screen remounts or the request is replayed.
+        const { data: latestAiQuests, error: latestAiQuestsError } = await supabase
+            .from("quests")
+            .select("id, title, description, quest_type, difficulty, xp_reward, gold_reward, stat_affected, stat_points, is_active, is_ai_generated, is_custom, chain_id, chain_step, chain_total, created_at, updated_at")
+            .eq("user_id", user.id)
+            .eq("is_ai_generated", true)
+            .eq("is_custom", false)
+            .order("created_at", { ascending: false })
+            .limit(20);
+
+        if (latestAiQuestsError) {
+            console.warn("Failed to read latest AI quests before generation:", latestAiQuestsError.message);
+        } else if ((latestAiQuests?.length ?? 0) > 0) {
+            const newestCreatedAt = new Date(latestAiQuests![0].created_at).getTime();
+            const recentBatch = latestAiQuests!
+                .filter((quest) => {
+                    const createdAt = new Date(quest.created_at).getTime();
+                    return Number.isFinite(createdAt) && Math.abs(newestCreatedAt - createdAt) <= RECENT_BATCH_WINDOW_MS;
+                })
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+            const batchMatchesCurrentProfile = newestCreatedAt >= (profileUpdatedAtMs - PROFILE_SYNC_GRACE_MS);
+
+            if (recentBatch.length >= MIN_GENERATED_BATCH_SIZE && batchMatchesCurrentProfile) {
+                const bossCount = recentBatch.filter((quest) =>
+                    quest.quest_type === "boss" && (quest.chain_step === null || quest.chain_step === 1)
+                ).length;
+                const chainCount = recentBatch.filter((quest) =>
+                    typeof quest.chain_step === "number" && quest.chain_step > 1
+                ).length;
+
+                return new Response(
+                    JSON.stringify({
+                        success: true,
+                        quests: recentBatch,
+                        summary: {
+                            daily: recentBatch.filter((quest) => quest.quest_type === "daily").length,
+                            side: recentBatch.filter((quest) => quest.quest_type === "side").length,
+                            boss: bossCount,
+                            chain: chainCount,
+                        },
+                        reused_existing: true,
+                    }),
+                    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+        }
 
         const likesText = profile?.likes ? `\nWhat I LIKE/ENJOY: ${profile.likes}` : "";
         const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
@@ -173,15 +245,18 @@ serve(async (req) => {
 
         // Parse and VALIDATE the AI-generated quests (whitelists fields)
         const generatedQuests = validateQuestResponse(aiResponse);
+        const dailyQuestPool = generatedQuests.daily_quests.slice(0, DAILY_POOL_LIMIT);
+        const activeDailyCount = getActiveDailyLimit(dailyQuestPool.length);
+        const sideQuests = generatedQuests.side_quests.slice(0, SIDE_QUEST_LIMIT);
 
         // Generate a chain_id for boss + chain quests
         const chainId = crypto.randomUUID();
-        const chainQuests = generatedQuests.chain_quests || [];
+        const chainQuests = (generatedQuests.chain_quests || []).slice(0, CHAIN_QUEST_LIMIT);
         const chainTotal = 1 + chainQuests.length; // boss = step 1
 
         // Prepare quests for database insertion — only known columns
         const allQuests = [
-            ...generatedQuests.daily_quests.map(q => ({
+            ...dailyQuestPool.map((q, index) => ({
                 title: q.title,
                 description: q.description,
                 quest_type: q.quest_type,
@@ -191,10 +266,10 @@ serve(async (req) => {
                 stat_points: q.stat_points,
                 user_id: user.id,
                 is_ai_generated: true,
-                is_active: true,
-                gold_reward: 0,
+                is_active: index < activeDailyCount,
+                gold_reward: getQuestGoldReward(q.quest_type, q.difficulty),
             })),
-            ...generatedQuests.side_quests.map(q => ({
+            ...sideQuests.map(q => ({
                 title: q.title,
                 description: q.description,
                 quest_type: q.quest_type,
@@ -205,7 +280,7 @@ serve(async (req) => {
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,
-                gold_reward: 0,
+                gold_reward: getQuestGoldReward(q.quest_type, q.difficulty),
             })),
             // Boss quest = chain step 1 (active)
             {
@@ -219,7 +294,7 @@ serve(async (req) => {
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,
-                gold_reward: 5,
+                gold_reward: getQuestGoldReward(generatedQuests.boss_quest.quest_type, generatedQuests.boss_quest.difficulty),
                 chain_id: chainTotal > 1 ? chainId : null,
                 chain_step: chainTotal > 1 ? 1 : null,
                 chain_total: chainTotal > 1 ? chainTotal : null,
@@ -236,7 +311,7 @@ serve(async (req) => {
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: false, //  LOCKED until previous step completed
-                gold_reward: 5 + (i + 1) * 2,
+                gold_reward: getQuestGoldReward('boss', (q.difficulty || "hard") as "easy" | "medium" | "hard" | "epic"),
                 chain_id: chainId,
                 chain_step: i + 2,
                 chain_total: chainTotal,

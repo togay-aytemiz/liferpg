@@ -12,6 +12,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callOpenAI, validateQuestResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
+
+const DAILY_POOL_LIMIT = 7;
+const SIDE_QUEST_LIMIT = 2;
+const CHAIN_QUEST_LIMIT = 3;
+
+function getActiveDailyLimit(poolSize: number): number {
+    if (poolSize <= 0) return 0;
+    if (poolSize <= 3) return poolSize;
+    return Math.min(Math.max(poolSize - 2, 3), 5);
+}
 
 const SYSTEM_PROMPT = `You are a game master for LifeRPG, a gamified productivity app.
 
@@ -58,13 +69,18 @@ You MUST return valid JSON with this exact structure:
 }
 
 Rules:
-- Generate 4-6 daily quests, 2-3 side quests, 1 boss quest
+- Generate 5-7 daily quests as a SMALL weekly pool
+- The first daily quests in the array should be the best fit for TODAY; later ones should feel like alternate dailies for the next few days
+- Generate 1-2 side quests and 1 boss quest
 - Generate 2-3 chain_quests that form a QUEST CHAIN with the boss quest:
   - Each chain quest is a progressively harder continuation of the boss quest
   - Think of it as chapters in a story: Step 1 (boss_quest) → Step 2 → Step 3 → Step 4
+  - The boss_quest is the ONLY current weekly boss the user should see right away
+  - chain_quests are FUTURE weekly chapters, not simultaneous active bosses
   - Chain quests start LOCKED (inactive) and unlock as the user completes each step
 - If the user has completed quests before, make new quests slightly more challenging or varied
 - If the user has SKIPPED/DISLIKED certain quests, do NOT generate similar ones
+- Keep the user's ACTIVE list small and game-like. Do not create an overwhelming wall of chores.
 - Match activities to stats: exercise→strength, reading→knowledge, work→wealth, travel→adventure, social→social
 - Keep titles concise and RPG-themed
 - IMPORTANT CONTEXT AVOIDANCE: If the user provides 'active_habits', DO NOT generate Daily or Side quests that perfectly match these existing habits. Generate complementary or entirely new quests instead.`;
@@ -202,15 +218,18 @@ serve(async (req) => {
         );
 
         const generatedQuests = validateQuestResponse(aiResponse);
+        const dailyQuestPool = generatedQuests.daily_quests.slice(0, DAILY_POOL_LIMIT);
+        const activeDailyCount = getActiveDailyLimit(dailyQuestPool.length);
+        const sideQuests = generatedQuests.side_quests.slice(0, SIDE_QUEST_LIMIT);
 
         // Generate a chain_id for boss + chain quests
         const chainId = crypto.randomUUID();
-        const chainQuests = generatedQuests.chain_quests || [];
+        const chainQuests = (generatedQuests.chain_quests || []).slice(0, CHAIN_QUEST_LIMIT);
         const chainTotal = 1 + chainQuests.length; // boss = step 1
 
         // 5. Insert new quests — explicit field mapping, no raw AI spread
         const allQuests = [
-            ...generatedQuests.daily_quests.map(q => ({
+            ...dailyQuestPool.map((q, index) => ({
                 title: q.title,
                 description: q.description,
                 quest_type: q.quest_type,
@@ -220,10 +239,10 @@ serve(async (req) => {
                 stat_points: q.stat_points,
                 user_id: user.id,
                 is_ai_generated: true,
-                is_active: true,
-                gold_reward: 0,
+                is_active: index < activeDailyCount,
+                gold_reward: getQuestGoldReward(q.quest_type, q.difficulty),
             })),
-            ...generatedQuests.side_quests.map(q => ({
+            ...sideQuests.map(q => ({
                 title: q.title,
                 description: q.description,
                 quest_type: q.quest_type,
@@ -234,7 +253,7 @@ serve(async (req) => {
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,
-                gold_reward: 0,
+                gold_reward: getQuestGoldReward(q.quest_type, q.difficulty),
             })),
             // Boss quest = chain step 1 (active)
             {
@@ -248,7 +267,7 @@ serve(async (req) => {
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: true,
-                gold_reward: 5,
+                gold_reward: getQuestGoldReward(generatedQuests.boss_quest.quest_type, generatedQuests.boss_quest.difficulty),
                 chain_id: chainTotal > 1 ? chainId : null,
                 chain_step: chainTotal > 1 ? 1 : null,
                 chain_total: chainTotal > 1 ? chainTotal : null,
@@ -265,7 +284,7 @@ serve(async (req) => {
                 user_id: user.id,
                 is_ai_generated: true,
                 is_active: false, //  LOCKED until previous step completed
-                gold_reward: 5 + (i + 1) * 2,
+                gold_reward: getQuestGoldReward('boss', (q.difficulty || "hard") as "easy" | "medium" | "hard" | "epic"),
                 chain_id: chainId,
                 chain_step: i + 2,
                 chain_total: chainTotal,

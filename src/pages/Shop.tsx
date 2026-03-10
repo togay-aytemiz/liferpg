@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import AppHeader from '../components/AppHeader';
 import { supabase } from '../lib/supabase';
 import { buyItem, generateShopItems, purchaseShopItem } from '../lib/api';
 import type { ShopItem, ShopCategory } from '../lib/database.types';
+import { clearPersistedShopOffers, readPersistedShopOffers, writePersistedShopOffers } from '../lib/shopOfferCache';
 import {
-    Coins, Heart, Star, Shield, AlertCircle, Check, ArrowLeft,
+    Coins, Heart, Star, Shield, AlertCircle, Check,
     Coffee, Tv, Sparkles, BookOpen, Dumbbell, Map, Gamepad2, Users,
     RefreshCw, Clock
 } from 'lucide-react';
@@ -59,8 +60,7 @@ const CATEGORY_STYLES: Record<ShopCategory, { icon: React.ReactNode; color: stri
 };
 
 export default function Shop() {
-    const navigate = useNavigate();
-    const { user } = useAuth();
+    const { user, profile, refreshProfile } = useAuth();
 
     const [gold, setGold] = useState<number>(0);
     const [dynamicItems, setDynamicItems] = useState<ShopItem[]>([]);
@@ -71,18 +71,27 @@ export default function Shop() {
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
     useEffect(() => {
+        if (typeof profile?.gold === 'number') {
+            setGold(profile.gold);
+        }
+    }, [profile?.gold]);
+
+    useEffect(() => {
         if (!user) return;
+        const cachedOffers = readPersistedShopOffers(user.id);
+        if (cachedOffers) {
+            setDynamicItems(cachedOffers);
+            setLoading(false);
+            return;
+        }
+
         fetchData();
     }, [user]);
 
     const fetchData = async () => {
         setLoading(true);
 
-        // 1. Fetch Gold
-        const { data: profile } = await supabase.from('profiles').select('gold').eq('id', user!.id).single() as any;
-        if (profile && typeof (profile as any).gold === 'number') setGold((profile as any).gold);
-
-        // 2. Fetch Dynamic Items that are not expired and not purchased
+        // Fetch Dynamic Items that are not expired and not purchased.
         const nowIso = new Date().toISOString();
         const { data: items } = await supabase
             .from('shop_items')
@@ -90,12 +99,13 @@ export default function Shop() {
             .eq('user_id', user!.id)
             .eq('is_purchased', false)
             .gt('expires_at', nowIso)
+            .order('created_at', { ascending: true })
             .order('cost', { ascending: true });
 
         if (items && items.length > 0) {
-            setDynamicItems(items as ShopItem[]);
+            const nextItems = writePersistedShopOffers(user!.id, items as ShopItem[]);
+            setDynamicItems(nextItems);
         } else {
-            // Need to generate new items!
             handleGenerateShop();
         }
 
@@ -107,8 +117,7 @@ export default function Shop() {
         try {
             const res = await generateShopItems();
             if (res.success && res.items) {
-                // Sort by cost
-                const sorted = [...res.items].sort((a, b) => a.cost - b.cost);
+                const sorted = writePersistedShopOffers(user!.id, [...res.items].sort((a, b) => a.cost - b.cost));
                 setDynamicItems(sorted);
                 showToast("The Merchant has fresh wares for you!", "success");
             }
@@ -133,7 +142,9 @@ export default function Shop() {
         setBuyingId(item.id);
         try {
             const res = await buyItem(item.id);
-            setGold(prev => prev - item.cost);
+            const nextGold = gold - item.cost;
+            setGold(nextGold);
+            await refreshProfile();
             showToast(res.message, 'success');
         } catch (error: any) {
             console.error("Purchase failed:", error);
@@ -151,10 +162,20 @@ export default function Shop() {
         setBuyingId(item.id);
         try {
             await purchaseShopItem(item.id);
-            setGold(prev => prev - item.cost);
+            const nextGold = gold - item.cost;
+            setGold(nextGold);
             showToast(`You bought: ${item.title}! Enjoy your reward!`, 'success');
             // Remove from list
-            setDynamicItems(prev => prev.filter(i => i.id !== item.id));
+            setDynamicItems(prev => {
+                const nextItems = prev.filter(i => i.id !== item.id);
+                if (user && nextItems.length > 0) {
+                    writePersistedShopOffers(user.id, nextItems);
+                } else if (user) {
+                    clearPersistedShopOffers(user.id);
+                }
+                return nextItems;
+            });
+            await refreshProfile();
         } catch (error: any) {
             console.error("Purchase failed:", error);
             showToast(error.message || "Failed to purchase item.", "error");
@@ -169,7 +190,7 @@ export default function Shop() {
     };
 
     return (
-        <div className="flex-1 flex flex-col animate-in fade-in duration-500 bg-slate-950 pb-20">
+        <div className="flex-1 flex flex-col animate-in fade-in duration-500 bg-slate-950">
             {/* Toast */}
             {toast && (
                 <div className={`fixed top-4 left-4 right-4 z-50 px-4 py-3 rounded-lg text-sm text-center shadow-lg animate-in slide-in-from-top-2 duration-200 ${toast.type === 'error'
@@ -183,25 +204,19 @@ export default function Shop() {
                 </div>
             )}
 
-            {/* Header */}
-            <div className="px-4 pt-6 pb-4 flex items-center justify-between border-b border-slate-800 bg-slate-900/50 sticky top-0 z-40 backdrop-blur-md">
-                <div className="flex items-center gap-3">
-                    <button onClick={() => navigate(-1)} className="text-slate-400 hover:text-white transition-colors p-1">
-                        <ArrowLeft className="w-6 h-6" />
-                    </button>
-                    <div>
-                        <h1 className="font-heading text-2xl text-amber-500">The Bazaar</h1>
-                        <p className="text-xs text-slate-500 font-heading tracking-wide uppercase">Real & Magical Wares</p>
+            <AppHeader
+                title="Bazaar"
+                subtitle="Spend your quest gold on curated rewards and magical goods."
+                actions={(
+                    <div className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-slate-900 px-3 py-1.5 shadow-glow-gold">
+                        <Coins className="h-4 w-4 text-amber-500" />
+                        <span className="font-mono font-bold text-amber-500">{loading ? '...' : gold}</span>
                     </div>
-                </div>
-                <div className="bg-slate-900 border border-amber-500/30 px-3 py-1.5 rounded-full flex items-center gap-2 shadow-glow-gold">
-                    <Coins className="w-4 h-4 text-amber-500" />
-                    <span className="font-mono text-amber-500 font-bold">{loading ? '...' : gold}</span>
-                </div>
-            </div>
+                )}
+            />
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-8">
+            <div className="flex-1 overflow-y-auto p-4 pt-5 pb-[calc(8rem+env(safe-area-inset-bottom))] space-y-8">
 
                 {/* DYNAMIC REAL-LIFE REWARDS */}
                 <section className="space-y-4">
@@ -238,13 +253,13 @@ export default function Shop() {
                                                 {style.icon}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="flex items-start justify-between gap-2 mb-1">
-                                                    <h3 className="font-heading text-lg text-white leading-tight truncate">{item.title}</h3>
+                                                <div className="mb-1 flex items-start justify-between gap-2">
+                                                    <h3 className="line-clamp-2 pr-1 font-heading text-lg leading-tight text-white">{item.title}</h3>
                                                     <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 shrink-0">
                                                         {style.label}
                                                     </span>
                                                 </div>
-                                                <p className="text-sm text-slate-400 leading-snug line-clamp-2">{item.description}</p>
+                                                <p className="line-clamp-3 text-sm leading-snug text-slate-400">{item.description}</p>
                                             </div>
                                         </div>
 

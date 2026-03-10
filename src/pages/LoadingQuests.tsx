@@ -1,130 +1,214 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Compass } from 'lucide-react';
 import { generateQuests, generateRewards } from '../lib/api';
 import { supabase } from '../lib/supabase';
 
+const STEP_ROTATION_MS = 4200;
+const STEP_FADE_MS = 450;
+
 const GENERATION_STEPS = [
-    "Analyzing your daily rhythm...",
-    "Creating daily quests...",
-    "Preparing weekly challenges...",
-    "Crafting your rewards...",
-    "Building your character profile..."
+    "Reading the rhythm of your realm...",
+    "Mapping your daily questline...",
+    "Scanning your hero routine...",
+    "Forging tasks from your timeline...",
+    "Weaving your weekly campaign...",
+    "Tuning your stat progression path...",
+    "Decoding your habit patterns...",
+    "Summoning quests from your schedule...",
+    "Aligning goals with your character build...",
+    "Finalizing your adventure blueprint..."
 ];
 
-const TIPS = [
-    "Tip: Daily quests reset every night at midnight. Consistency is key!",
-    "Tip: Try converting a quest you enjoy into a daily habit.",
-    "Tip: Missing a day resets your streak, but you can buy a Streak Freeze in the shop!",
-    "Tip: Boss quests require effort but give massive XP and Gold.",
-    "Tip: Adventure stats increase when you explore new places or hobbies.",
-    "Tip: Social stats increase when you connect with friends, family, or colleagues.",
-    "Tip: Wealth doesn't just mean money; it's about career and productivity too.",
-    "Tip: Knowledge quests are great for reading, studying, or learning new skills.",
-    "Tip: Strength quests test your physical limits and willpower.",
-    "Tip: Need a break? Buy a Health Potion from the shop to restore HP.",
-    "Tip: If you're stuck, use a custom quest to tailor the challenge.",
-    "Tip: Over time, the AI learns your preferences. Be sure to skip quests you dislike.",
-    "Tip: Your Life Rhythm controls your quests. Update it in settings anytime!",
-    "Tip: Earning Gold allows you to buy real-life rewards you set for yourself.",
-    "Tip: Achievements grant rare titles and a showcase for your profile."
-];
+type LoadingLocationState = {
+    generationId?: string;
+    lifeRhythm?: string;
+    likes?: string;
+    dislikes?: string;
+    focusAreas?: string;
+    isFirstTime?: boolean;
+};
+
+type GenerationRun = {
+    status: 'pending' | 'success' | 'error';
+    promise: Promise<void>;
+    error?: string;
+};
+
+const generationRunCache = new Map<string, GenerationRun>();
+
+async function executeGeneration(params: {
+    userId: string;
+    isFirstTime: boolean;
+    lifeRhythmFromState?: string;
+    effectiveLifeRhythm?: string | null;
+    likes?: string;
+    dislikes?: string;
+    focusAreas?: string;
+}) {
+    const {
+        userId,
+        isFirstTime,
+        lifeRhythmFromState,
+        effectiveLifeRhythm,
+        likes,
+        dislikes,
+        focusAreas,
+    } = params;
+
+    if (isFirstTime && lifeRhythmFromState) {
+        await supabase
+            .from('profiles')
+            // @ts-ignore
+            .update({
+                life_rhythm: lifeRhythmFromState,
+                likes: likes || null,
+                dislikes: dislikes || null,
+                focus_areas: focusAreas || null,
+            })
+            .eq('id', userId);
+    }
+
+    if (effectiveLifeRhythm) {
+        await generateQuests(effectiveLifeRhythm);
+    }
+
+    try {
+        await generateRewards();
+    } catch (rewardErr) {
+        console.warn('Reward generation failed (non-blocking):', rewardErr);
+    }
+}
+
+function getOrCreateGenerationRun(key: string, params: {
+    userId: string;
+    isFirstTime: boolean;
+    lifeRhythmFromState?: string;
+    effectiveLifeRhythm?: string | null;
+    likes?: string;
+    dislikes?: string;
+    focusAreas?: string;
+}) {
+    const existingRun = generationRunCache.get(key);
+    if (existingRun) {
+        return existingRun;
+    }
+
+    let run!: GenerationRun;
+    run = {
+        status: 'pending',
+        promise: (async () => {
+            try {
+                await executeGeneration(params);
+                run.status = 'success';
+            } catch (error) {
+                const message = error instanceof Error
+                    ? error.message
+                    : 'Quest generation failed. Please try again.';
+                run.status = 'error';
+                run.error = message;
+                throw error;
+            }
+        })(),
+    };
+
+    generationRunCache.set(key, run);
+    return run;
+}
 
 export default function LoadingQuests() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { profile } = useAuth();
+    const { user, session, profile, loading: authLoading } = useAuth();
     const [stepIndex, setStepIndex] = useState(0);
-    const [progress, setProgress] = useState(0);
+    const [stepVisible, setStepVisible] = useState(true);
     const [error, setError] = useState('');
     const [isFinished, setIsFinished] = useState(false);
-    const [tipIndex, setTipIndex] = useState(0);
-    const calledRef = useRef(false);
+    const locationState = (location.state as LoadingLocationState | null) ?? null;
+    const generationId = locationState?.generationId;
+    const lifeRhythmFromState = locationState?.lifeRhythm;
+    const effectiveLifeRhythm = lifeRhythmFromState || profile?.life_rhythm;
+    const isFirstTime = locationState?.isFirstTime === true;
+    const generationKey = generationId ?? `${user?.id ?? 'anonymous'}::${lifeRhythmFromState ?? effectiveLifeRhythm ?? 'empty'}`;
 
     useEffect(() => {
-        setTipIndex(Math.floor(Math.random() * TIPS.length));
-        const tipTimer = setInterval(() => {
-            setTipIndex(Math.floor(Math.random() * TIPS.length));
-        }, 4500);
-        return () => clearInterval(tipTimer);
-    }, []);
-
-    useEffect(() => {
-        if (calledRef.current) return;
-        calledRef.current = true;
-
-        const effectiveLifeRhythm = (location.state as { lifeRhythm?: string })?.lifeRhythm || profile?.life_rhythm;
-
-        // Start the visual progress animation
-        const totalVisualDuration = 6000; // 6s minimum visual duration
-        const intervalTime = 60;
-        const totalTicks = totalVisualDuration / intervalTime;
-        let currentTick = 0;
-        let aiDone = false;
-        let aiSuccess = false;
-
-        const timer = setInterval(() => {
-            currentTick++;
-            // Progress goes up to 90% during AI call, then jumps to 100% when done
-            const maxProgress = aiDone ? 100 : 90;
-            const currentProgress = Math.min((currentTick / totalTicks) * 100, maxProgress);
-            setProgress(currentProgress);
-
-            if (currentProgress < 20) setStepIndex(0);
-            else if (currentProgress < 40) setStepIndex(1);
-            else if (currentProgress < 60) setStepIndex(2);
-            else if (currentProgress < 80) setStepIndex(3);
-            else setStepIndex(4);
-
-            if (aiDone && currentProgress >= 100) {
-                clearInterval(timer);
-                setIsFinished(true);
-                if (aiSuccess) {
-                    setTimeout(() => navigate('/dashboard'), 400);
-                }
-            }
-        }, intervalTime);
-
-        const callAI = async () => {
-            try {
-                // If coming straight from onboarding, save the profile first
-                if (location.state?.isFirstTime && location.state?.lifeRhythm && profile?.id) {
-                    await supabase
-                        .from('profiles')
-                        // @ts-ignore
-                        .update({
-                            life_rhythm: location.state.lifeRhythm,
-                            likes: location.state.likes || null,
-                            dislikes: location.state.dislikes || null,
-                            focus_areas: location.state.focusAreas || null
-                        })
-                        .eq('id', profile.id);
-                }
-
-                if (effectiveLifeRhythm) {
-                    await generateQuests(effectiveLifeRhythm);
-                }
-                // Generate personalized rewards after quests
-                try {
-                    await generateRewards();
-                } catch (rewardErr) {
-                    console.warn('Reward generation failed (non-blocking):', rewardErr);
-                }
-                aiSuccess = true;
-            } catch (err: any) {
-                console.error('Quest generation failed:', err);
-                setError(err.message || 'Quest generation failed. Please try again.');
-                aiSuccess = false; // Do not auto-navigate if failed
-            } finally {
-                aiDone = true;
-            }
+        if (isFinished) return;
+        let fadeTimer: ReturnType<typeof setTimeout> | null = null;
+        const stepTimer = setInterval(() => {
+            setStepVisible(false);
+            fadeTimer = setTimeout(() => {
+                setStepIndex((prev) => (prev + 1) % GENERATION_STEPS.length);
+                setStepVisible(true);
+            }, STEP_FADE_MS);
+        }, STEP_ROTATION_MS);
+        return () => {
+            clearInterval(stepTimer);
+            if (fadeTimer) clearTimeout(fadeTimer);
         };
+    }, [isFinished]);
 
-        callAI();
+    useEffect(() => {
+        if (authLoading || !session?.access_token || !user?.id) return;
 
-        return () => clearInterval(timer);
-    }, [navigate, location.state, profile?.life_rhythm]);
+        let cancelled = false;
+        const run = getOrCreateGenerationRun(generationKey, {
+            userId: user.id,
+            isFirstTime,
+            lifeRhythmFromState,
+            effectiveLifeRhythm,
+            likes: locationState?.likes,
+            dislikes: locationState?.dislikes,
+            focusAreas: locationState?.focusAreas,
+        });
+
+        run.promise
+            .then(() => {
+                if (cancelled) return;
+                setError('');
+                setIsFinished(true);
+                setTimeout(() => {
+                    generationRunCache.delete(generationKey);
+                    navigate('/dashboard');
+                }, 400);
+            })
+            .catch((err: unknown) => {
+                if (cancelled) return;
+                console.error('Quest generation failed:', err);
+                const message = err instanceof Error
+                    ? err.message
+                    : run.error || 'Quest generation failed. Please try again.';
+                setIsFinished(true);
+                if (/session expired|unauthorized|not authenticated|invalid jwt/i.test(message)) {
+                    setError('Session expired. Redirecting to login...');
+                    setTimeout(() => navigate('/auth', { replace: true }), 900);
+                } else {
+                    setError(message);
+                }
+            });
+
+        if (run.status === 'error' && run.error) {
+            setError(run.error);
+            setIsFinished(true);
+        }
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        authLoading,
+        navigate,
+        session?.access_token,
+        user?.id,
+        profile?.id,
+        effectiveLifeRhythm,
+        generationKey,
+        isFirstTime,
+        lifeRhythmFromState,
+        locationState?.likes,
+        locationState?.dislikes,
+        locationState?.focusAreas
+    ]);
 
     return (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-700">
@@ -135,34 +219,20 @@ export default function LoadingQuests() {
                 <Compass className="w-16 h-16 text-amber-500 animate-[spin_4s_linear_infinite] relative z-10" />
             </div>
 
-            <h2 className="font-heading text-2xl text-white mb-2">
+            <h2 className="font-heading text-2xl text-white mb-3">
                 Generating your quests...
             </h2>
 
-            <p className="text-slate-400 text-sm mb-12 max-w-[260px] mx-auto leading-relaxed">
-                We are analyzing your routine and preparing your daily and weekly quests.
-            </p>
-
-            {/* RPG Progress Bar */}
+            {/* Rotating RPG Loading Text */}
             <div className="w-full max-w-xs space-y-4">
                 <div className="h-6 flex items-center justify-center">
-                    <p className="text-amber-500 text-sm font-mono tracking-wider animate-pulse">
+                    <p
+                        className={`text-amber-500/95 text-sm font-mono tracking-wider transition-all duration-500 ease-out ${stepVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
+                            }`}
+                    >
                         {GENERATION_STEPS[stepIndex]}
                     </p>
                 </div>
-
-                <div className="w-full h-4 bg-slate-800 rounded-full shadow-inner-panel overflow-hidden border border-slate-700/50 p-0.5 relative">
-                    <div
-                        className="h-full bg-amber-500 rounded-full transition-all duration-75 ease-linear shadow-glow-gold relative overflow-hidden"
-                        style={{ width: `${progress}%` }}
-                    >
-                        <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]"></div>
-                    </div>
-                </div>
-
-                <p className="text-slate-500 font-mono text-xs">
-                    {Math.floor(progress)}%
-                </p>
 
                 {error && isFinished && (
                     <div className="mt-8 flex flex-col items-center gap-4 animate-in fade-in zoom-in duration-300">
@@ -171,13 +241,19 @@ export default function LoadingQuests() {
                         </p>
                         <div className="flex gap-3 mt-2">
                             <button
-                                onClick={() => navigate('/onboarding')}
+                                onClick={() => {
+                                    generationRunCache.delete(generationKey);
+                                    navigate('/onboarding');
+                                }}
                                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-semibold transition-colors border border-slate-700 hover:border-slate-500"
                             >
                                 Back to Onboarding
                             </button>
                             <button
-                                onClick={() => window.location.reload()}
+                                onClick={() => {
+                                    generationRunCache.delete(generationKey);
+                                    window.location.reload();
+                                }}
                                 className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-lg text-sm font-bold transition-colors shadow-glow-gold"
                             >
                                 Retry Generation
@@ -186,16 +262,6 @@ export default function LoadingQuests() {
                     </div>
                 )}
             </div>
-
-            {/* Rotating Tips */}
-            {!error && !isFinished && (
-                <div className="absolute bottom-12 left-6 right-6 text-center animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-500">
-                    <p className="text-amber-500/80 font-heading text-xs uppercase tracking-widest mb-2 opacity-80">Did you know?</p>
-                    <p className="text-slate-400 text-sm italic transition-opacity duration-500 max-w-sm mx-auto min-h-[40px]">
-                        "{TIPS[tipIndex]}"
-                    </p>
-                </div>
-            )}
 
         </div>
     );

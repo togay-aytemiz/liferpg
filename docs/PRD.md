@@ -80,6 +80,16 @@ Tasks are converted into quests.
 **Daily Quests** (Repeatable tasks)
 - *Examples:* workout, read 20 minutes, study session, work deep focus
 - *Reward:* XP
+- AI should generate a **small rotating pool**, not a wall of chores.
+- Only **3-5 daily quests** should be active/visible at a time; the rest of the current pool can rotate in on later days without requiring a fresh LLM call every day.
+- Daily quests should support **rerolling** into another option from the current hidden pool instead of using a punitive "skip" action.
+- If the user completes at least **80%** of the currently active daily quests, the day should count as sufficiently cleared for overnight penalty purposes; leftover dailies should not trigger HP/streak punishment on their own.
+- The active daily set should refresh on a **nightly 03:00** cadence, and the UI should show a countdown to that reset.
+- On compact mobile HUD cards, the countdown should read as a centered three-line block: label, remaining time, then reset helper line.
+- The non-daily quest refresh quota should surface in quest action context (the `... more` menu / regenerate flow), not inside the top progress summary card.
+- Home and Quests should reuse the same daily-progress card component so the progress HUD, reset countdown, and daily-rule helper stay visually identical.
+- The daily-penalty explanation should live behind a subtle helper action (for example, `What happens if I miss some?`) instead of sitting as always-visible warning text.
+- That helper should open as a centered overlay above the fixed bottom HUD so the modal never collides with navbar controls on mobile.
 
 **Side Quests** (Optional activities)
 - *Examples:* try a new recipe, walk outside, learn a micro skill, creative activity
@@ -91,8 +101,16 @@ Tasks are converted into quests.
 
 **Quest Chains** (Multi-step narrative quests)
 - *Logic:* Completing a Boss Quest (Step 1) unlocks a sequence of 2-4 connected tasks.
-- *Visuals:* Chain steps are "ghosted" (locked) until the previous link is completed.
+- *Visuals:* Future chain steps stay hidden until the previous link is completed, so the user only sees the current chapter.
 - *Narrative:* Designed by AI to tell a story or breakdown a large goal into manageable phases.
+- At any moment, the player should see **only one active weekly boss/current chapter** in the quest flow; older completed boss chapters should not linger in the active list.
+
+### 4.4 Settings / Quest Setup
+- Life Rhythm and related quest-personalization inputs should not sit in an always-live editable state.
+- Settings should present the current quest setup in read-only form by default, with an explicit **Edit** action to change it.
+- The **Regenerate Quests** action should only enable when the quest-setup form is actually dirty.
+- Regenerating quests from Settings should preserve progression state: **XP, level, gold, streak, stats, achievements, and other earned progress must remain untouched**.
+- Settings-based regeneration should not implicitly force-regenerate milestone rewards.
 
 ### 4.3 XP and Level System
 Completing quests gives XP.
@@ -175,6 +193,9 @@ Separate from quests, users can define *Habits* that remain active day-to-day.
 - **Frequencies:** Habits can be Daily, Weekly, or Monthly — each with its own tracking cadence.
 - **Quest → Habit Conversion:** Any AI-generated quest can be converted into a permanent habit with one click.
 - **LLM Context:** Active habits are injected into all AI prompts so the system never generates redundant quests.
+- **Deletion Safety:** Removing a habit should require explicit confirmation because the inline remove affordance is intentionally compact on mobile.
+- Habit deletion confirmation should use an app-owned modal/dialog, not the browser's default confirm UI.
+- Habit cards should follow the same interaction language as quest cards: square primary action on the left, content in the middle, and secondary actions such as removal behind a compact action menu.
 
 ### 4.9 Shop & Economy System
 Gold is earned through quests and boss battles. It can be spent in the Shop ("The Bazaar").
@@ -188,7 +209,10 @@ Gold is earned through quests and boss battles. It can be spent in the Shop ("Th
 - LLM generates 4 personalized real-life rewards based on user's life rhythm and preferences.
 - Each item is categorized into one of 8 visual categories: Food/Drink, Entertainment, Self-Care, Learning, Gear, Experience, Digital, Social.
 - Items expire after 7 days; shop auto-restocks with fresh AI-generated items.
+- Reopening the Bazaar during that active window should reuse the same current offers instead of regenerating them.
+- The active personalized offer set should stay diverse: only one active offer per category at a time.
 - Cost ranges from 100 to 1500 gold.
+- Quests should visibly award gold in the UI so the player understands how Bazaar spending is funded; the app should not hide the earn loop behind a top-right number alone.
 
 *Purpose:* Give the virtual economy weight so the "Death Penalty" (losing gold) feels impactful, while the dynamic offers provide tangible real-life motivation.
 
@@ -210,8 +234,8 @@ Users can create custom AI-evaluated quests via free-text prompt.
 
 **2. Loading / Generation Screen**
 - Displayed after submitting Life Rhythm
-- Simulates processing: Analyzing rhythm → Creating quests → Building profile
-- Animated RPG-style progress indicator (XP bar)
+- Uses rotating RPG-themed status lines instead of a fake percentage bar
+- Reflects variable backend latency without pretending precise progress
 
 **3. Dashboard (Main screen)**
 - Character card
@@ -222,6 +246,8 @@ Users can create custom AI-evaluated quests via free-text prompt.
 
 **2. Quest Screen (Quest list)**
 - Sections: Daily quests, Side quests, Boss quests
+- Navbar-driven screens should not rely on redundant back buttons in the header.
+- Protected navbar-driven pages should share one consistent sticky header treatment.
 - Quest card includes: quest name, XP reward, difficulty icon, completion toggle
 
 **3. Character Screen (Character overview)**
@@ -229,6 +255,7 @@ Users can create custom AI-evaluated quests via free-text prompt.
 - XP progress
 - Stat bars
 - Character avatar
+- Bottom-nav labels may use compact abbreviations (`CHAR`), while the page header itself should use the full title `Character`.
 
 **4. Achievement Screen (Achievement gallery)**
 - Unlocked achievements
@@ -327,4 +354,36 @@ The core user loop:
 - **2026-03-10 - Viewport Shell Stabilization:** The root app shell now uses a fixed viewport-height container (`h-screen` + `100dvh`) with a dedicated internal `overflow-y-auto` region. This prevents mobile pages from losing vertical scroll when body overflow is intentionally locked.
 - **2026-03-10 - Label Copy Compression:** Onboarding focus prompt copy was shortened to "What should we focus on?" to improve readability and reduce visual noise.
 - **2026-03-10 - Onboarding Prompt Scope Alignment:** The onboarding helper sentence now references both routine and preferences, matching the full data collected by the form (likes, dislikes, and focus areas) while remaining concise.
+- **2026-03-10 - Loading UX Fallback Strategy:** The quest-generation screen now favors rotating RPG status lines over a percentage progress bar to avoid presenting misleading static progress when backend latency is variable.
+- **2026-03-10 - Loading Readability Polish:** Loading state now avoids secondary tip clutter and uses slower cross-fade status transitions for better perceived stability during generation waits.
+- **2026-03-10 - Loading Copy Deduplication:** The quest-generation screen no longer repeats a static explanatory sentence beneath the title; the rotating amber status line is now the sole loading explanation to keep the state cleaner and less redundant.
+- **2026-03-10 - Loading Subtitle Hierarchy:** The rotating amber loading line now sits directly under the main title with tighter spacing so it reads as the primary subtitle, not as a detached block lower on the screen.
+- **2026-03-10 - Edge Auth Resilience:** Frontend edge-function calls now explicitly forward bearer tokens and perform a single refresh-session retry on HTTP 401 before surfacing errors, reducing false "stuck" states caused by transient auth expiry.
+- **2026-03-10 - Dark Input Surface Standardization:** Onboarding form fields now use a deeper navy panel treatment with consistent border/placeholder contrast to match the RPG night theme and reduce visual mismatch after auth transition.
+- **2026-03-10 - Mobile Form Zoom Control:** iOS text autoscaling/auto-zoom regressions are mitigated by removing autofocus on onboarding and enforcing 16px minimum control typography for inputs/textareas/selects.
+- **2026-03-10 - Cross-Screen Form Style Consistency:** Authentication and onboarding now share a single dark-field style token set so panel color, border treatment, and focus behavior remain visually consistent; onboarding field sizing was also tightened for denser mobile readability.
+- **2026-03-10 - Unauthorized Loop Containment:** The auth context now ignores loading-state toggles for token-refresh events, and loading generation treats repeated 401 as session-expired with redirect to login. This prevents remount-driven retry loops and console error flooding.
+- **2026-03-10 - Proactive JWT Validity Check:** Frontend edge invocations now refresh Supabase sessions when cached access tokens are near expiry and deduplicate onboarding generation attempts client-side, ensuring expired JWTs fail fast instead of repeatedly replaying the same request.
+- **2026-03-10 - Generation Single-Flight Execution:** The loading screen now reuses a module-scoped generation promise keyed by a unique `generationId` passed from onboarding. This makes quest generation idempotent across React StrictMode remounts and transient route remounts, preventing duplicate `generate-quests` calls and ensuring the surviving screen instance still receives the original result.
+- **2026-03-10 - Server-Side LLM Reuse Guard:** To control token spend even when clients replay requests, `generate-quests` now returns the most recent complete non-custom AI quest batch if it was just created, and `generate-rewards` returns existing milestone rewards by default unless the Settings flow explicitly forces regeneration.
+- **2026-03-10 - Browser Autofill Theme Enforcement:** Shared form fields now use a dedicated dark-field class with strong autofill overrides (`color-scheme: dark`, inset background lock, text-fill override) so browser credential autofill cannot visually switch inputs to a light theme after hydration.
+- **2026-03-10 - Brand Wordmark Balance:** The auth wordmark now uses uppercase `LIFE` with bold `RPG` in the same heading scale, avoiding the misleading mixed-size appearance caused by lowercase letterforms.
+- **2026-03-10 - Onboarding Generation Session Determinism:** Post-login onboarding generation now waits for an explicitly rehydrated, server-validated Supabase session before the first protected AI call. Edge invocations use direct authenticated fetches, and onboarding profile persistence keys off `user.id` instead of optional profile state to remove post-onboarding 401 races.
+- **2026-03-10 - Edge Auth Ownership Moved In-Function:** Protected Edge Functions no longer rely on gateway-level JWT verification. Instead, they consistently enforce auth inside the function body via `supabase.auth.getUser(token)`, which avoids false `Invalid JWT` gateway failures while preserving server-side-only OpenAI access and authenticated user checks.
 - **2026-03-10 - LLM Reliability Standards:** AI generation now uses stronger consistency guards: chain quest payloads are preserved through validation, active-habit/dislike context is supplied across generation paths, custom quest creation uses shared retry/sanitization logic, OpenAI calls now use bounded request timeouts with retry, rewards refresh no longer risks pre-delete data loss, and regeneration no longer deactivates existing auto quests until new quests are successfully inserted.
+- **2026-03-10 - Manageable Daily Pool Rotation:** Quest generation now creates a small daily quest pool instead of a long always-active list. Only a manageable 3-5 daily quests are active at once, future boss-chain steps remain hidden until unlocked, and `daily-cron` rotates the active daily subset over time so users get fresh-feeling daily focus without incurring a new OpenAI call each day.
+- **2026-03-10 - HUD Anchoring & Progress Accuracy:** Protected screens now use a viewport-fixed bottom HUD with safe-area padding, streak/gold are surfaced beside the level label, and the XP bar fills from the true start of the current level instead of appearing pre-filled at level 1.
+- **2026-03-10 - Navbar-Owned Screen Navigation:** The bottom HUD now belongs to the protected application shell rather than individual pages. This guarantees persistence across Dashboard, Quests, Bazaar, CHAR, and Settings, removes redundant header back arrows on navbar-driven screens, and allows compact nav labels like `CHAR` while the actual page header keeps the full title `Character`.
+- **2026-03-10 - Shared Protected Header Shell:** Quests, Bazaar, Character, and Settings now render through one reusable sticky header shell so title color, spacing, blur, and subtitle treatment stay visually consistent across every navbar-driven page.
+- **2026-03-10 - Daily Reroll Without Token Spend:** Daily quests now reroll by swapping in another hidden quest from the already-generated daily pool instead of calling the LLM again or treating the action as a penalized skip. Overnight HP penalties now use an 80% daily completion threshold so the day still feels strict, but a nearly-cleared daily set does not create unnecessary punishment.
+- **2026-03-10 - Centralized Onboarding Completion Routing:** The application now treats a non-empty persisted `life_rhythm` as the canonical onboarding-complete signal across login redirects, root redirects, and direct `/onboarding` hits. This prevents previously onboarded users from being prompted for the same setup again and keeps Settings as the place to revise those answers later.
+- **2026-03-10 - Singular Weekly Boss Visibility:** The weekly boss loop now behaves like a focused chapter system rather than a backlog. Frontend quest selection shows only one current boss, completed boss chapters deactivate on completion, and nightly maintenance re-normalizes AI-generated boss visibility so legacy data cannot accumulate a wall of active weekly bosses.
+- **2026-03-10 - Shared Quest Card Action Model:** Dashboard and Quests now render the same quest card component. Secondary actions moved behind a `... more` menu so habit conversion and reroll/regeneration are not represented by competing inline icons, and Home intentionally limits itself to hero HUD, today's dailies, and habits instead of duplicating side/boss/stats/rewards content.
+- **2026-03-10 - Settings Quest Regeneration Guard:** Settings now treats life-rhythm-driven quest inputs as an explicit edit flow rather than a permanently dirty textarea block. Quest regeneration only enables when those inputs truly changed, and the Settings action refreshes quest content without forcibly replacing milestone rewards or touching earned progression state.
+- **2026-03-10 - Protected Tab Cache Strategy:** Bottom-nav screen hops now rely on short-lived in-memory caches for quest runtime, streak, habits, Bazaar, and Awards payloads. Mutations explicitly invalidate those caches so idle navigation stays quiet without letting action-driven state go stale.
+- **2026-03-10 - Bazaar Weekly Offer Persistence:** Personalized Bazaar offers now use a persisted client cache for their full weekly lifetime, and `generate-shop` returns active unexpired offers before attempting another LLM call. The server also collapses duplicate active categories so one weekly offer type cannot occupy multiple slots at once.
+- **2026-03-10 - Shared Daily Progress HUD:** Dashboard and Quests now reuse one daily-progress card component. The reset countdown became a vertically centered three-line block, and the daily-penalty rule moved into a compact helper modal so the HUD stays clean without hiding the consequences.
+- **2026-03-10 - Modal Overlays Above The HUD:** Mobile helper modals triggered from HUD cards now render as centered overlays above the fixed bottom navbar with their own higher stacking layer, avoiding clipped actions or partially hidden copy.
+- **2026-03-10 - App-Owned Confirmation UI:** Destructive confirmations in the main HUD flow now use in-app dialogs instead of browser-native confirm popups so typography, colors, button hierarchy, and overlay behavior stay consistent with the rest of LifeRPG.
+- **2026-03-10 - Habit Cards Follow Quest Affordances:** Habit tracking cards now mirror the quest-card interaction model instead of inventing a separate one. Logging uses a square left-side action control, while deletion moved into a cleaner secondary action menu so the card no longer ends with an ambiguous floating `X` and neon `+/-` button pairing.
+- **2026-03-10 - Quest Gold Loop Visibility:** The quest economy now treats gold as a first-class reward instead of hidden metadata. Generated quests across daily/side/boss flows receive meaningful gold values, older zero-gold quests still pay via completion fallback logic, quest cards show gold beside XP, and Bazaar copy explicitly frames gold as a quest-earned currency to spend.

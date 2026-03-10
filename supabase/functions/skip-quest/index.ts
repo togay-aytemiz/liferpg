@@ -15,8 +15,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 import { callOpenAI } from "../_shared/openai.ts";
+import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
 
 const MAX_DAILY_SKIPS = 3;
+const RECENT_BATCH_WINDOW_MS = 60_000;
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
 const VALID_STATS = new Set(["strength", "knowledge", "wealth", "adventure", "social"]);
 
@@ -48,11 +50,113 @@ serve(async (req) => {
             );
         }
 
-        const { quest_id, reason } = await req.json();
+        const { quest_id, reason, mode } = await req.json();
         if (!quest_id) {
             return new Response(
                 JSON.stringify({ error: "quest_id is required" }),
                 { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        const today = new Date().toISOString().split("T")[0];
+
+        // 2. Fetch the quest to get its details
+        const { data: quest } = await supabase
+            .from("quests")
+            .select("title, quest_type, stat_affected, difficulty")
+            .eq("id", quest_id)
+            .single();
+
+        if (!quest) {
+            return new Response(
+                JSON.stringify({ error: "Quest not found" }),
+                { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        if (mode === "reroll") {
+            if (quest.quest_type !== "daily") {
+                return new Response(
+                    JSON.stringify({ error: "Only daily quests can be rerolled" }),
+                    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+
+            const { data: latestDailyPool, error: latestDailyPoolError } = await supabase
+                .from("quests")
+                .select("id, title, created_at, is_active")
+                .eq("user_id", user.id)
+                .eq("quest_type", "daily")
+                .eq("is_ai_generated", true)
+                .eq("is_custom", false)
+                .order("created_at", { ascending: false })
+                .limit(20);
+
+            if (latestDailyPoolError || !latestDailyPool || latestDailyPool.length === 0) {
+                return new Response(
+                    JSON.stringify({ error: "No daily quest pool available for reroll" }),
+                    { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+
+            const newestCreatedAt = new Date(latestDailyPool[0].created_at).getTime();
+            const latestBatch = latestDailyPool
+                .filter((dailyQuest) => {
+                    const createdAt = new Date(dailyQuest.created_at).getTime();
+                    return Number.isFinite(createdAt) && Math.abs(newestCreatedAt - createdAt) <= RECENT_BATCH_WINDOW_MS;
+                })
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+            const { data: completedToday } = await supabase
+                .from("user_quests")
+                .select("quest_id")
+                .eq("user_id", user.id)
+                .eq("quest_date", today)
+                .eq("is_completed", true);
+
+            const completedQuestIds = new Set((completedToday ?? []).map((entry: { quest_id: string }) => entry.quest_id));
+            const replacementQuest = latestBatch.find((dailyQuest) =>
+                dailyQuest.id !== quest_id &&
+                !dailyQuest.is_active &&
+                !completedQuestIds.has(dailyQuest.id)
+            );
+
+            if (!replacementQuest) {
+                return new Response(
+                    JSON.stringify({ error: "No alternate daily quest available right now" }),
+                    { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+
+            await supabase
+                .from("quests")
+                .update({ is_active: false })
+                .eq("id", quest_id)
+                .eq("user_id", user.id);
+
+            const { data: activatedQuest, error: activatedQuestError } = await supabase
+                .from("quests")
+                .update({ is_active: true })
+                .eq("id", replacementQuest.id)
+                .eq("user_id", user.id)
+                .select("*")
+                .single();
+
+            if (activatedQuestError || !activatedQuest) {
+                return new Response(
+                    JSON.stringify({ error: "Failed to activate alternate daily quest" }),
+                    { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+
+            return new Response(
+                JSON.stringify({
+                    success: true,
+                    rerolled_quest: quest.title,
+                    new_quest: activatedQuest,
+                    message: `Daily rerolled: "${activatedQuest.title}"`,
+                }),
+                { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
 
@@ -78,8 +182,6 @@ serve(async (req) => {
             );
         }
 
-        const today = new Date().toISOString().split("T")[0];
-
         // 1. Check daily skip count
         const { count: todaySkips } = await supabase
             .from("user_quests")
@@ -98,20 +200,6 @@ serve(async (req) => {
                     message: `You can only skip ${MAX_DAILY_SKIPS} quests per day. Try completing this one or come back tomorrow!`,
                 }),
                 { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-        }
-
-        // 2. Fetch the quest to get its details
-        const { data: quest } = await supabase
-            .from("quests")
-            .select("title, quest_type, stat_affected, difficulty")
-            .eq("id", quest_id)
-            .single();
-
-        if (!quest) {
-            return new Response(
-                JSON.stringify({ error: "Quest not found" }),
-                { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
 
@@ -269,7 +357,7 @@ Return valid JSON:
                     user_id: user.id,
                     is_ai_generated: true,
                     is_active: true,
-                    gold_reward: quest.quest_type === 'boss' ? 5 : 0,
+                    gold_reward: getQuestGoldReward(quest.quest_type, safeDifficulty as "easy" | "medium" | "hard" | "epic"),
                 })
                 .select()
                 .single();

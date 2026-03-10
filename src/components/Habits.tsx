@@ -3,13 +3,19 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logHabit } from '../lib/api';
 import type { Habit } from '../lib/database.types';
-import { Plus, Minus, ArrowUp, ArrowDown, Activity, X } from 'lucide-react';
+import HabitCard from './HabitCard';
+import { HABIT_CREATED_EVENT } from '../lib/habitEvents';
+import { getHabitsCacheKey, readCachedValue, VIEW_CACHE_TTL_MS, writeCachedValue } from '../lib/viewCache';
+import { Plus, Activity } from 'lucide-react';
 
 export default function Habits() {
     const { user } = useAuth();
     const [habits, setHabits] = useState<Habit[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<Habit | null>(null);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [loggingId, setLoggingId] = useState<string | null>(null);
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
     // Modal state
@@ -21,7 +27,39 @@ export default function Habits() {
 
     useEffect(() => {
         if (!user) return;
+        const cacheKey = getHabitsCacheKey(user.id);
+        const cachedHabits = readCachedValue<Habit[]>(cacheKey);
+        if (cachedHabits.hit) {
+            setHabits(cachedHabits.value);
+            setLoading(false);
+            return;
+        }
+
         fetchHabits();
+    }, [user]);
+
+    useEffect(() => {
+        const handleHabitCreated = (event: Event) => {
+            if (!(event instanceof CustomEvent)) return;
+            const newHabit = event.detail as Habit;
+
+            if (!user || newHabit.user_id !== user.id) return;
+
+            setHabits((prev) => {
+                let nextHabits = prev;
+
+                if (!prev.some((habit) => habit.id === newHabit.id)) {
+                    nextHabits = [newHabit, ...prev];
+                }
+
+                writeCachedValue(getHabitsCacheKey(user.id), nextHabits, VIEW_CACHE_TTL_MS);
+                return nextHabits;
+            });
+            setLoading(false);
+        };
+
+        window.addEventListener(HABIT_CREATED_EVENT, handleHabitCreated as EventListener);
+        return () => window.removeEventListener(HABIT_CREATED_EVENT, handleHabitCreated as EventListener);
     }, [user]);
 
     const fetchHabits = async () => {
@@ -32,7 +70,11 @@ export default function Habits() {
             .eq('is_active', true)
             .order('created_at', { ascending: false });
 
-        if (data) setHabits(data as Habit[]);
+        if (data) {
+            const nextHabits = data as Habit[];
+            setHabits(nextHabits);
+            writeCachedValue(getHabitsCacheKey(user!.id), nextHabits, VIEW_CACHE_TTL_MS);
+        }
         setLoading(false);
     };
 
@@ -61,7 +103,9 @@ export default function Habits() {
         if (error) {
             showToast("Failed to create habit.", "error");
         } else if (data) {
-            setHabits([data as Habit, ...habits]);
+            const nextHabits = [data as Habit, ...habits];
+            setHabits(nextHabits);
+            writeCachedValue(getHabitsCacheKey(user.id), nextHabits, VIEW_CACHE_TTL_MS);
             setShowModal(false);
             setTitle('');
             showToast("Habit created successfully!");
@@ -70,6 +114,7 @@ export default function Habits() {
 
     const handleLogHabit = async (habit: Habit) => {
         try {
+            setLoggingId(habit.id);
             const result = await logHabit(habit.id);
             if (result.success) {
                 if (result.died) {
@@ -82,12 +127,36 @@ export default function Habits() {
             }
         } catch (err: any) {
             showToast(err.message || "Failed to log habit", "error");
+        } finally {
+            setLoggingId(null);
         }
     };
 
-    const handleDeleteHabit = async (habitId: string) => {
-        await supabase.from('habits').delete().eq('id', habitId); // Using delete for simplicity as is_active strict update causes issues
-        setHabits(prev => prev.filter(h => h.id !== habitId));
+    const confirmDeleteHabit = async () => {
+        if (!deleteTarget) return;
+        setDeletingId(deleteTarget.id);
+
+        const { error } = await supabase
+            .from('habits')
+            .delete()
+            .eq('id', deleteTarget.id); // Using delete for simplicity as is_active strict update causes issues
+
+        if (error) {
+            showToast('Failed to remove habit.', 'error');
+            setDeletingId(null);
+            return;
+        }
+
+        setHabits(prev => {
+            const nextHabits = prev.filter(h => h.id !== deleteTarget.id);
+            if (user) {
+                writeCachedValue(getHabitsCacheKey(user.id), nextHabits, VIEW_CACHE_TTL_MS);
+            }
+            return nextHabits;
+        });
+        setDeleteTarget(null);
+        setDeletingId(null);
+        showToast('Habit removed.');
     };
 
     return (
@@ -123,35 +192,13 @@ export default function Habits() {
             ) : (
                 <div className="grid grid-cols-1 gap-2">
                     {habits.map(h => (
-                        <div key={h.id} className="bg-slate-800/80 border border-slate-700/80 rounded-lg p-3 flex flex-col gap-2 hover:bg-slate-800 hover:border-slate-600 transition-colors group">
-                            <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium text-white group-hover:text-amber-500 transition-colors">{h.title}</span>
-                                <button onClick={() => handleDeleteHabit(h.id)} className="text-slate-600 hover:text-red-400 transition-colors" title="Hide Habit">
-                                    <X className="w-4 h-4" />
-                                </button>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <span className={`text-xs capitalize font-heading flex items-center gap-1 ${h.is_good ? 'text-emerald-500' : 'text-red-500'}`}>
-                                    {h.is_good ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                                    {h.stat_affected}
-                                </span>
-                                <span className="text-xs text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 ml-2">
-                                    {h.frequency}
-                                </span>
-
-                                <div className="flex-1"></div>
-
-                                <button
-                                    onClick={() => handleLogHabit(h)}
-                                    className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95 ${h.is_good
-                                        ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-800/50 hover:bg-emerald-800 hover:border-emerald-500 shadow-glow-emerald mr-2'
-                                        : 'bg-red-900/50 text-red-400 border border-red-800/50 hover:bg-red-800 hover:border-red-500 shadow-glow-red mr-2'
-                                        }`}
-                                >
-                                    {h.is_good ? <Plus className="w-5 h-5" /> : <Minus className="w-5 h-5" />}
-                                </button>
-                            </div>
-                        </div>
+                        <HabitCard
+                            key={h.id}
+                            habit={h}
+                            isLogging={loggingId === h.id}
+                            onLog={handleLogHabit}
+                            onRemove={setDeleteTarget}
+                        />
                     ))}
                 </div>
             )}
@@ -237,6 +284,39 @@ export default function Habits() {
                                 className="flex-1 py-2.5 rounded-lg text-sm font-medium bg-amber-500 text-slate-900 hover:bg-amber-400 transition-all font-heading tracking-wide disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {submitting ? 'Creating...' : 'Create Habit'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {deleteTarget && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-200">
+                    <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-xl animate-in zoom-in-95 duration-200">
+                        <h3 className="font-heading text-lg text-white">Remove Habit</h3>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                            Remove <span className="font-medium text-white">"{deleteTarget.title}"</span> from your habit tracker?
+                        </p>
+                        <p className="mt-2 text-xs text-slate-500">
+                            This removes it from the active habit list. You can always create it again later.
+                        </p>
+
+                        <div className="mt-5 flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setDeleteTarget(null)}
+                                disabled={deletingId === deleteTarget.id}
+                                className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm font-heading text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={confirmDeleteHabit}
+                                disabled={deletingId === deleteTarget.id}
+                                className="flex-1 rounded-lg border border-red-500/30 bg-red-900/40 px-4 py-2.5 text-sm font-heading text-red-200 transition-colors hover:bg-red-800/50 disabled:opacity-50"
+                            >
+                                {deletingId === deleteTarget.id ? 'Removing...' : 'Remove Habit'}
                             </button>
                         </div>
                     </div>

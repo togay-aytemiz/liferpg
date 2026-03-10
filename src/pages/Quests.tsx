@@ -1,24 +1,33 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import type { Quest } from '../lib/database.types';
-import { completeQuest, skipQuest, createCustomQuest, convertToHabit } from '../lib/api';
-import { ArrowLeft, Check, Swords, Shield, Skull, X, Plus, Repeat } from 'lucide-react';
-import BottomNav from '../components/BottomNav';
+import { completeQuest, regenerateQuest, rerollDailyQuest, createCustomQuest, convertToHabit } from '../lib/api';
+import {
+    getDailyQuestProgress,
+    getVisibleDailyQuests,
+    getVisibleWeeklyBoss,
+} from '../lib/gameplay';
+import { Shield, Swords, Skull, Plus, RefreshCw } from 'lucide-react';
+import AppHeader from '../components/AppHeader';
+import DailyProgressCard from '../components/DailyProgressCard';
+import QuestCard from '../components/QuestCard';
+import { emitHabitCreated } from '../lib/habitEvents';
+import { fetchQuestRuntime } from '../lib/questRuntime';
 
 export default function Quests() {
-    const navigate = useNavigate();
     const { user, refreshProfile } = useAuth();
     const [quests, setQuests] = useState<Quest[]>([]);
     const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+    const [completedBossIds, setCompletedBossIds] = useState<Set<string>>(new Set());
     const [loadingId, setLoadingId] = useState<string | null>(null);
-    const [skippingId, setSkippingId] = useState<string | null>(null);
-    const [skipModalOpen, setSkipModalOpen] = useState<{ id: string; title: string } | null>(null);
+    const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+    const [rerollingId, setRerollingId] = useState<string | null>(null);
+    const [habitActionId, setHabitActionId] = useState<string | null>(null);
+    const [regenerateModalOpen, setRegenerateModalOpen] = useState<{ id: string; title: string } | null>(null);
     const [tab, setTab] = useState<'daily' | 'side' | 'boss'>('daily');
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+    const [remainingRegenerations, setRemainingRegenerations] = useState(0);
 
-    // Custom Quest State
     const [customModalOpen, setCustomModalOpen] = useState(false);
     const [customPrompt, setCustomPrompt] = useState('');
     const [isCreatingCustom, setIsCreatingCustom] = useState(false);
@@ -28,88 +37,109 @@ export default function Quests() {
         setTimeout(() => setToast(null), 3000);
     };
 
-    const fetchQuests = useCallback(async () => {
+    const fetchQuests = useCallback(async (options?: { force?: boolean }) => {
         if (!user) return;
-        const { data } = await supabase
-            .from('quests')
-            .select('*')
-            .eq('user_id', user.id)
-            .or('is_active.eq.true,chain_id.not.is.null')
-            .order('chain_step', { ascending: true }) // Sort by step order
-            .order('created_at', { ascending: true });
-        if (data) setQuests(data as Quest[]);
 
-        const today = new Date().toISOString().split('T')[0];
-        const { data: comps } = await supabase
-            .from('user_quests')
-            .select('quest_id')
-            .eq('user_id', user.id)
-            .eq('quest_date', today)
-            .eq('is_completed', true);
-        if (comps) setCompletedIds(new Set(comps.map((c: { quest_id: string }) => c.quest_id)));
+        const snapshot = await fetchQuestRuntime(user.id, { force: options?.force });
+        setQuests(snapshot.quests);
+        setCompletedIds(new Set(snapshot.completedQuestIds));
+        setCompletedBossIds(new Set(snapshot.completedBossIds));
+        setRemainingRegenerations(snapshot.remainingRegenerations);
     }, [user]);
 
-    useEffect(() => { fetchQuests(); }, [fetchQuests]);
+    useEffect(() => {
+        fetchQuests();
+    }, [fetchQuests]);
 
-    const handleComplete = async (questId: string) => {
-        if (completedIds.has(questId) || loadingId || skippingId) return;
-        setLoadingId(questId);
+    const handleComplete = async (quest: Quest) => {
+        if (completedIds.has(quest.id) || loadingId || regeneratingId || rerollingId || habitActionId) return;
+        setLoadingId(quest.id);
+
         try {
-            const result = await completeQuest(questId);
-            setCompletedIds(prev => new Set([...prev, questId]));
+            const result = await completeQuest(quest.id);
+            setCompletedIds((prev) => new Set([...prev, quest.id]));
             await refreshProfile();
 
             if (result.chain_unlocked) {
-                showToast(`Quest Completed! Next Step Unlocked: ${result.chain_unlocked}`);
+                showToast(`+${result.xp_awarded} XP • +${result.gold_awarded} Gold. Next chapter unlocked: ${result.chain_unlocked}`);
             } else {
-                showToast(`+${result.xp_awarded} XP earned!`);
+                showToast(`+${result.xp_awarded} XP • +${result.gold_awarded} Gold`);
             }
-            await fetchQuests(); // Re-fetch to see the newly unlocked step if any
+
+            await fetchQuests({ force: true });
         } catch (err) {
             console.error(err);
             showToast('Failed to complete quest', 'error');
+        } finally {
+            setLoadingId(null);
         }
-        setLoadingId(null);
     };
 
-    const handleSkipClick = (questId: string, title: string) => {
-        if (loadingId || skippingId) return;
-        setSkipModalOpen({ id: questId, title });
+    const handleOpenRegenerate = (quest: Quest) => {
+        if (loadingId || regeneratingId || rerollingId || habitActionId) return;
+        setRegenerateModalOpen({ id: quest.id, title: quest.title });
     };
 
-    const confirmSkip = async (reason: string) => {
-        if (!skipModalOpen) return;
-        const { id } = skipModalOpen;
-        setSkippingId(id);
-        setSkipModalOpen(null); // Close modal
+    const handleRerollDaily = async (quest: Quest) => {
+        if (loadingId || regeneratingId || rerollingId || habitActionId || completedIds.has(quest.id)) return;
+        setRerollingId(quest.id);
+
         try {
-            const result = await skipQuest(id, reason);
+            const result = await rerollDailyQuest(quest.id);
 
-            // Remove skipped quest from local list and optionally append the replacement
-            setQuests(prev => {
-                const filtered = prev.filter(q => q.id !== id);
-                if (result.new_quest) {
-                    return [...filtered, result.new_quest].sort((a, b) =>
-                        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-                    );
-                }
-                return filtered;
+            setQuests((prev) => {
+                const withoutOldQuest = prev.filter((existingQuest) => existingQuest.id !== quest.id);
+                if (!result.new_quest) return withoutOldQuest;
+
+                return [...withoutOldQuest, result.new_quest].sort((a, b) =>
+                    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
             });
 
+            showToast(result.message || 'Daily quest rerolled.');
+        } catch (err: any) {
+            console.error(err);
+            showToast(err.message || 'Failed to reroll daily quest', 'error');
+        } finally {
+            setRerollingId(null);
+        }
+    };
+
+    const confirmRegenerate = async (reason: string) => {
+        if (!regenerateModalOpen) return;
+
+        const { id } = regenerateModalOpen;
+        setRegeneratingId(id);
+        setRegenerateModalOpen(null);
+
+        try {
+            const result = await regenerateQuest(id, reason);
+
+            setQuests((prev) => {
+                const filtered = prev.filter((quest) => quest.id !== id);
+                if (!result.new_quest) return filtered;
+
+                return [...filtered, result.new_quest].sort((a, b) =>
+                    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
+            });
+
+            setRemainingRegenerations(result.remaining_skips);
             await refreshProfile();
 
             if (result.died) {
-                showToast(`☠️ YOU DIED! Lost half gold & streak reset.`, 'error');
+                showToast('You died during regeneration. Half your gold and your streak were lost.', 'error');
             } else if (result.hp_lost) {
-                showToast(`-${result.hp_lost} HP | ${result.message || 'Quest skipped.'}`, 'error');
+                showToast(`-${result.hp_lost} HP. ${result.message || 'Quest regenerated.'}`, 'error');
             } else {
-                showToast(result.message || `Quest skipped. ${result.remaining_skips} skips left today.`);
+                showToast(result.message || `Quest regenerated. ${result.remaining_skips} refreshes left today.`);
             }
         } catch (err: any) {
             console.error(err);
-            showToast(err.message || 'Failed to skip quest', 'error');
+            showToast(err.message || 'Failed to regenerate quest', 'error');
+        } finally {
+            setRegeneratingId(null);
         }
-        setSkippingId(null);
     };
 
     const handleCreateCustom = async (e: React.FormEvent) => {
@@ -118,11 +148,10 @@ export default function Quests() {
 
         setIsCreatingCustom(true);
         try {
-            const targetType = tab === 'boss' ? 'side' : tab; // Boss quests can't be custom easily, default to side
+            const targetType = tab === 'boss' ? 'side' : tab;
             const result = await createCustomQuest(customPrompt, targetType);
 
-            // Add new quest to list
-            setQuests(prev => [...prev, result.quest].sort((a, b) =>
+            setQuests((prev) => [...prev, result.quest].sort((a, b) =>
                 new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
             ));
 
@@ -132,144 +161,80 @@ export default function Quests() {
         } catch (err: any) {
             console.error(err);
             showToast(err.message || 'Failed to create quest', 'error');
+        } finally {
+            setIsCreatingCustom(false);
         }
-        setIsCreatingCustom(false);
     };
 
-    const handleMakeHabit = async (questTitle: string, statAffected?: string | null) => {
+    const handleMakeHabit = async (quest: Quest) => {
         try {
-            await convertToHabit(questTitle, statAffected);
-            setToast({ msg: `"${questTitle}" added to Good Habits!`, type: 'success' });
-            setTimeout(() => setToast(null), 3000);
+            setHabitActionId(quest.id);
+            const habit = await convertToHabit(quest.title, quest.stat_affected);
+            emitHabitCreated(habit);
+            showToast(`"${quest.title}" added to Habits!`);
         } catch (err: any) {
-            setToast({ msg: err.message || "Failed to create habit", type: 'error' });
-            setTimeout(() => setToast(null), 3000);
+            showToast(err.message || 'Failed to create habit', 'error');
+        } finally {
+            setHabitActionId(null);
         }
     };
 
-    const filtered = quests.filter(q => q.quest_type === tab);
+    const visibleDailyQuests = getVisibleDailyQuests(quests);
+    const visibleWeeklyBoss = getVisibleWeeklyBoss(quests, completedBossIds);
+    const sideQuests = quests.filter((quest) => quest.quest_type === 'side');
+    const dailyProgress = getDailyQuestProgress(visibleDailyQuests, completedIds);
 
-    const diffColors: Record<string, string> = {
-        easy: 'text-emerald-400', medium: 'text-amber-400', hard: 'text-red-400', epic: 'text-purple-400',
-    };
-
-    function renderQuestCard(q: Quest) {
-        const done = completedIds.has(q.id);
-        const isLoading = loadingId === q.id;
-        const isSkipping = skippingId === q.id;
-        const isLocked = !q.is_active && !done;
-
-        return (
-            <div
-                key={q.id}
-                className={`bg-slate-800 border rounded-lg p-4 flex items-start gap-3 shadow-hud transition-all 
-                    ${done ? 'border-emerald-800/50 opacity-60' : q.quest_type === 'boss' ? 'border-red-900/40' : 'border-slate-700'}
-                    ${isLocked ? 'grayscale border-dashed border-slate-800 opacity-40' : ''}
-                `}
-            >
-                <button
-                    onClick={() => handleComplete(q.id)}
-                    disabled={done || isLocked || !!loadingId || !!skippingId}
-                    className={`w-7 h-7 rounded mt-0.5 border-2 flex items-center justify-center shrink-0 transition-all 
-                        ${done ? 'bg-emerald-500 border-emerald-500' : isLocked ? 'bg-slate-900 border-slate-800 cursor-not-allowed' : 'bg-slate-900 border-slate-600 hover:border-amber-500'}
-                    `}
-                >
-                    {isLoading ? (
-                        <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-                    ) : done ? (
-                        <Check className="w-4 h-4 text-white" />
-                    ) : isLocked ? (
-                        <Skull className="w-4 h-4 text-slate-700" />
-                    ) : null}
-                </button>
-                <div className="flex-1">
-                    <div className="flex justify-between items-start gap-2">
-                        <p className={`font-medium text-sm ${done ? 'line-through text-slate-500' : isLocked ? 'text-slate-500' : 'text-white'}`}>
-                            {q.title}
-                        </p>
-                        {q.chain_step && (
-                            <span className="text-[10px] font-mono font-bold bg-slate-900/50 px-1.5 py-0.5 rounded border border-slate-700/50 text-slate-500">
-                                {q.chain_step}/{q.chain_total}
-                            </span>
-                        )}
-                    </div>
-                    {q.description && <p className="text-xs text-slate-500 mt-1">{q.description}</p>}
-                    <div className="flex items-center gap-3 mt-2">
-                        <span className="text-amber-500 text-xs font-mono">+{q.xp_reward} XP</span>
-                        <span className={`text-xs ${diffColors[q.difficulty] || 'text-slate-400'}`}>{q.difficulty}</span>
-                        {q.stat_affected && <span className="text-xs text-slate-500 capitalize">{q.stat_affected}</span>}
-                    </div>
-                </div>
-                {!done && !isLocked && (
-                    <div className="flex flex-col gap-1 mt-0.5 shrink-0">
-                        <button
-                            onClick={() => handleMakeHabit(q.title, q.stat_affected)}
-                            title="Make this a daily habit"
-                            className="text-slate-600 hover:text-emerald-400 transition-colors p-1"
-                        >
-                            <Repeat className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={() => handleSkipClick(q.id, q.title)}
-                            disabled={!!loadingId || !!skippingId}
-                            title="Skip this quest"
-                            className="text-slate-600 hover:text-red-400 transition-colors p-1"
-                        >
-                            {isSkipping ? (
-                                <div className="w-4 h-4 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                                <X className="w-4 h-4" />
-                            )}
-                        </button>
-                    </div>
-                )}
-            </div>
-        );
-    }
+    const displayedQuests = tab === 'daily'
+        ? visibleDailyQuests
+        : tab === 'boss'
+            ? (visibleWeeklyBoss ? [visibleWeeklyBoss] : [])
+            : sideQuests;
 
     return (
         <div className="flex-1 flex flex-col animate-in fade-in duration-500">
-            {/* Header */}
-            <div className="px-4 pt-6 pb-3 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <button onClick={() => navigate('/dashboard')} className="text-slate-400 hover:text-white transition-colors p-1">
-                        <ArrowLeft className="w-6 h-6" />
+            <AppHeader
+                title="Quests"
+                subtitle="Focused chapters only. No backlog wall."
+                actions={(
+                    <button
+                        onClick={() => setCustomModalOpen(true)}
+                        className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500 text-slate-900 shadow-glow-gold transition-colors hover:bg-amber-400"
+                        title="Add Custom Quest"
+                    >
+                        <Plus className="h-6 w-6" />
                     </button>
-                    <h1 className="font-heading text-2xl text-white">Quests</h1>
-                </div>
-                <button
-                    onClick={() => setCustomModalOpen(true)}
-                    className="w-10 h-10 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-900 flex items-center justify-center shadow-glow-gold transition-colors"
-                    title="Add Custom Quest"
-                >
-                    <Plus className="w-6 h-6" />
-                </button>
+                )}
+            />
+
+            <div className="px-4 pt-4">
+                <DailyProgressCard
+                    completed={dailyProgress.completed}
+                    total={dailyProgress.total}
+                />
             </div>
 
-            {/* Tabs */}
-            <div className="flex px-4 gap-2 mb-4">
-                {(['daily', 'side', 'boss'] as const).map(t => (
+            <div className="flex px-4 pt-4 gap-2">
+                {(['daily', 'side', 'boss'] as const).map((questTab) => (
                     <button
-                        key={t}
-                        onClick={() => setTab(t)}
-                        className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-heading tracking-wider uppercase transition-all ${tab === t
-                            ? t === 'boss'
+                        key={questTab}
+                        onClick={() => setTab(questTab)}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-heading tracking-wider uppercase transition-all ${tab === questTab
+                            ? questTab === 'boss'
                                 ? 'bg-red-900/40 text-red-400 border border-red-800'
                                 : 'bg-amber-500/20 text-amber-500 border border-amber-500/30'
                             : 'bg-slate-800 text-slate-500 border border-slate-700 hover:text-slate-300'
                             }`}
                     >
-                        {t === 'daily' && <Shield className="w-4 h-4" />}
-                        {t === 'side' && <Swords className="w-4 h-4" />}
-                        {t === 'boss' && <Skull className="w-4 h-4" />}
-                        {t}
+                        {questTab === 'daily' && <Shield className="w-4 h-4" />}
+                        {questTab === 'side' && <Swords className="w-4 h-4" />}
+                        {questTab === 'boss' && <Skull className="w-4 h-4" />}
+                        {questTab}
                     </button>
                 ))}
             </div>
 
-            {/* Toast */}
             {toast && (
-                <div className={`mx-4 mb-3 px-4 py-2.5 rounded-lg text-sm text-center animate-in fade-in slide-in-from-top-2 duration-200 ${toast.type === 'error'
+                <div className={`mx-4 mt-4 px-4 py-2.5 rounded-lg text-sm text-center animate-in fade-in slide-in-from-top-2 duration-200 ${toast.type === 'error'
                     ? 'bg-red-900/40 border border-red-800 text-red-400'
                     : 'bg-emerald-900/40 border border-emerald-800 text-emerald-400'
                     }`}>
@@ -277,53 +242,43 @@ export default function Quests() {
                 </div>
             )}
 
-            {/* Quest List */}
-            <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-4">
-                {filtered.length === 0 && (
+            <div className="flex-1 overflow-y-auto px-4 pt-4 pb-[calc(8rem+env(safe-area-inset-bottom))] space-y-4">
+                {displayedQuests.length === 0 && (
                     <p className="text-slate-500 text-sm text-center py-8">No {tab} quests found.</p>
                 )}
 
-                {(() => {
-                    const renderedChains = new Set<string>();
-                    return filtered.map(q => {
-                        if (q.chain_id && !renderedChains.has(q.chain_id)) {
-                            renderedChains.add(q.chain_id);
-                            const chainQuests = filtered.filter(cq => cq.chain_id === q.chain_id);
-                            return (
-                                <div key={q.chain_id} className="space-y-2">
-                                    <div className="flex items-center gap-2 px-1">
-                                        <div className="h-px flex-1 bg-slate-800" />
-                                        <span className="text-[10px] font-heading font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                                            <Skull className="w-3 h-3 text-slate-600" /> Quest Chain
-                                        </span>
-                                        <div className="h-px flex-1 bg-slate-800" />
-                                    </div>
-                                    <div className="space-y-2.5">
-                                        {chainQuests.map(cq => renderQuestCard(cq))}
-                                    </div>
-                                </div>
-                            );
-                        }
-                        if (!q.chain_id) return renderQuestCard(q);
-                        return null;
-                    });
-                })()}
+                {displayedQuests.map((quest) => (
+                    <QuestCard
+                        key={quest.id}
+                        quest={quest}
+                        isCompleted={completedIds.has(quest.id)}
+                        isCompleting={loadingId === quest.id}
+                        isActionLoading={regeneratingId === quest.id || rerollingId === quest.id || habitActionId === quest.id}
+                        onComplete={handleComplete}
+                        onMakeHabit={handleMakeHabit}
+                        onRerollDaily={quest.quest_type === 'daily' ? handleRerollDaily : undefined}
+                        onRegenerate={quest.quest_type !== 'daily' ? handleOpenRegenerate : undefined}
+                        remainingRegenerations={quest.quest_type !== 'daily' ? remainingRegenerations : null}
+                        disableActions={!!loadingId || !!regeneratingId || !!rerollingId || !!habitActionId}
+                    />
+                ))}
             </div>
 
-            {/* Skip Modal */}
-            {skipModalOpen && (
+            {regenerateModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-200">
                     <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-sm w-full p-5 shadow-xl animate-in fade-in zoom-in-95 duration-200">
-                        <h3 className="font-heading text-lg text-white mb-2">Skip Quest</h3>
+                        <h3 className="font-heading text-lg text-white mb-2">Regenerate Quest</h3>
                         <p className="text-slate-400 text-sm mb-4">
-                            Why are you skipping "<span className="text-white">{skipModalOpen.title}</span>"?
-                            This helps us generate better quests for you.
+                            Why should we replace "<span className="text-white">{regenerateModalOpen.title}</span>"?
+                        </p>
+                        <p className="text-xs text-slate-500 mb-4">
+                            {remainingRegenerations} refreshes left today.
                         </p>
                         <div className="space-y-2 mb-5">
-                            {['Takes too much time', 'Too difficult right now', 'Not interested', "Doesn't fit my routine"].map(reason => (
+                            {['Takes too much time', 'Too difficult right now', 'Not interested', "Doesn't fit my routine"].map((reason) => (
                                 <button
                                     key={reason}
-                                    onClick={() => confirmSkip(reason)}
+                                    onClick={() => confirmRegenerate(reason)}
                                     className="w-full text-left px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 text-slate-300 transition-colors text-sm"
                                 >
                                     {reason}
@@ -331,8 +286,8 @@ export default function Quests() {
                             ))}
                         </div>
                         <button
-                            onClick={() => setSkipModalOpen(null)}
-                            className="w-full py-2 rounded-lg font-heading tracking-wide uppercase text-sm border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setRegenerateModalOpen(null)}
+                            className="w-full px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-sm transition-colors"
                         >
                             Cancel
                         </button>
@@ -340,49 +295,42 @@ export default function Quests() {
                 </div>
             )}
 
-            {/* Create Custom Quest Modal */}
             {customModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-200">
                     <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-sm w-full p-5 shadow-xl animate-in fade-in zoom-in-95 duration-200">
                         <h3 className="font-heading text-lg text-white mb-2">Create Custom Quest</h3>
                         <p className="text-slate-400 text-sm mb-4">
-                            Write what you want to do (or <strong>avoid</strong> doing). The Game Master will assign XP, stats, and difficulty.
+                            Write the challenge you want to add.
                         </p>
-                        <form onSubmit={handleCreateCustom}>
+
+                        <form onSubmit={handleCreateCustom} className="space-y-4">
                             <textarea
                                 value={customPrompt}
-                                onChange={e => setCustomPrompt(e.target.value)}
-                                placeholder="E.g., No sugar today, Read 20 pages, Clean my desk..."
-                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 mb-4 h-24 resize-none"
-                                required
+                                onChange={(event) => setCustomPrompt(event.target.value)}
+                                placeholder='e.g. "No fast food today" or "Finish my presentation outline"'
+                                className="w-full min-h-[120px] rounded-lg border border-slate-700 bg-slate-800 px-3 py-3 text-sm text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
                             />
+
                             <div className="flex gap-3">
                                 <button
                                     type="button"
                                     onClick={() => setCustomModalOpen(false)}
-                                    className="flex-1 py-2.5 rounded-lg font-heading tracking-wide uppercase text-sm border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                    className="flex-1 rounded-lg bg-slate-800 px-4 py-2.5 text-sm text-slate-300 transition-colors hover:bg-slate-700"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={isCreatingCustom || !customPrompt.trim()}
-                                    className="flex-1 py-2.5 rounded-lg font-heading tracking-wide uppercase text-sm bg-amber-500 hover:bg-amber-400 text-slate-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                                    disabled={!customPrompt.trim() || isCreatingCustom}
+                                    className="flex-1 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-heading text-slate-900 transition-colors hover:bg-amber-400 disabled:bg-slate-700 disabled:text-slate-500"
                                 >
-                                    {isCreatingCustom ? (
-                                        <div className="w-5 h-5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                                    ) : (
-                                        "Summon"
-                                    )}
+                                    {isCreatingCustom ? <RefreshCw className="mx-auto w-4 h-4 animate-spin" /> : 'Forge Quest'}
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
-
-            {/* Bottom Navigation */}
-            <BottomNav />
         </div>
     );
 }

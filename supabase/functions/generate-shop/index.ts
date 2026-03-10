@@ -15,6 +15,44 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callOpenAI, validateShopResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 
+type ExistingShopItem = {
+    id: string;
+    title: string;
+    description: string;
+    cost: number;
+    category: string;
+    expires_at: string;
+    is_purchased: boolean;
+    created_at: string;
+};
+
+type GeneratedShopItem = {
+    title: string;
+    description: string;
+    cost: number;
+    category: string;
+};
+
+const SHOP_ITEM_COUNT = 4;
+
+function pickUniqueCategoryItems<T extends { category: string }>(items: T[]) {
+    const uniqueItems: T[] = [];
+    const duplicateItems: T[] = [];
+    const seenCategories = new Set<string>();
+
+    for (const item of items) {
+        if (seenCategories.has(item.category) || uniqueItems.length >= SHOP_ITEM_COUNT) {
+            duplicateItems.push(item);
+            continue;
+        }
+
+        seenCategories.add(item.category);
+        uniqueItems.push(item);
+    }
+
+    return { uniqueItems, duplicateItems };
+}
+
 const SYSTEM_PROMPT = `You are the mystical Merchant of LifeRPG, an app where real life is gamified.
 
 Your job is to generate a dynamic set of 4 REAL-LIFE items/rewards the user can "purchase" using their in-game Gold.
@@ -44,6 +82,7 @@ Categories you MUST choose from (pick exactly one for each item):
 
 Rules:
 - Generate 4 diverse items.
+- Use 4 different categories. Never repeat a category in the same batch.
 - Range costs from cheap (100-300 gold) to medium (400-800 gold) to one expensive chase item (1000+ gold).
 - Keep descriptions motivating. They are rewarding their hard work!`;
 
@@ -97,6 +136,39 @@ serve(async (req) => {
             .eq("is_purchased", false)
             .lt("expires_at", nowIso);
 
+        const { data: activeItems, error: activeItemsError } = await supabase
+            .from("shop_items")
+            .select("id, title, description, cost, category, expires_at, is_purchased, created_at")
+            .eq("user_id", user.id)
+            .eq("is_purchased", false)
+            .gt("expires_at", nowIso)
+            .order("created_at", { ascending: true })
+            .order("cost", { ascending: true });
+
+        if (activeItemsError) {
+            return new Response(
+                JSON.stringify({ error: "Failed to load active shop items", details: activeItemsError.message }),
+                { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        const existingItems = (activeItems as ExistingShopItem[] | null) || [];
+        const { uniqueItems: uniqueActiveItems, duplicateItems: duplicateActiveItems } = pickUniqueCategoryItems(existingItems);
+
+        if (duplicateActiveItems.length > 0) {
+            await supabase
+                .from("shop_items")
+                .delete()
+                .in("id", duplicateActiveItems.map((item) => item.id));
+        }
+
+        if (uniqueActiveItems.length > 0) {
+            return new Response(
+                JSON.stringify({ success: true, items: uniqueActiveItems }),
+                { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
         const likesText = profile?.likes ? `\nThings they LIKE (great reward ideas): ${profile.likes}` : "";
         const dislikesText = profile?.dislikes ? `\nThings they DISLIKE (AVOID suggesting these): ${profile.dislikes}` : "";
 
@@ -118,6 +190,14 @@ serve(async (req) => {
         );
 
         const generated = validateShopResponse(aiResponse);
+        const { uniqueItems: uniqueGeneratedItems } = pickUniqueCategoryItems(generated.items as GeneratedShopItem[]);
+
+        if (uniqueGeneratedItems.length === 0) {
+            return new Response(
+                JSON.stringify({ error: "Shop generation returned no unique items." }),
+                { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
 
         // Calculate expires_at: 7 days from now
         const expiresAt = new Date();
@@ -125,7 +205,7 @@ serve(async (req) => {
         const expiresAtIso = expiresAt.toISOString();
 
         // Prepare data for insertion
-        const itemsToInsert = generated.items.map(item => ({
+        const itemsToInsert = uniqueGeneratedItems.map(item => ({
             user_id: user.id,
             title: item.title,
             description: item.description,

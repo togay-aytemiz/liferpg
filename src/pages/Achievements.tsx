@@ -1,31 +1,72 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import AppHeader from '../components/AppHeader';
 import { supabase } from '../lib/supabase';
 import type { Achievement, UserAchievement } from '../lib/database.types';
-import { ArrowLeft, Trophy } from 'lucide-react';
-import BottomNav from '../components/BottomNav';
+import { getAwardsCacheKey, readCachedValue, STATIC_VIEW_CACHE_TTL_MS, writeCachedValue } from '../lib/viewCache';
+import { Trophy } from 'lucide-react';
+
+type AwardsSnapshot = {
+    achievements: Achievement[];
+    unlockedIds: string[];
+    unlockedAtById: Record<string, string>;
+};
 
 export default function Achievements() {
-    const navigate = useNavigate();
     const { user, profile } = useAuth();
     const [achievements, setAchievements] = useState<Achievement[]>([]);
     const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
+    const [unlockedAtById, setUnlockedAtById] = useState<Record<string, string>>({});
 
     useEffect(() => {
         if (!user) return;
         const load = async () => {
-            const { data: all } = await supabase.from('achievements').select('*').order('created_at');
-            if (all) setAchievements(all as Achievement[]);
+            const cacheKey = getAwardsCacheKey(user.id);
+            const cachedSnapshot = readCachedValue<AwardsSnapshot>(cacheKey);
+            if (cachedSnapshot.hit) {
+                setAchievements(cachedSnapshot.value.achievements);
+                setUnlockedIds(new Set(cachedSnapshot.value.unlockedIds));
+                setUnlockedAtById(cachedSnapshot.value.unlockedAtById);
+                return;
+            }
 
-            const { data: unlocked } = await supabase
-                .from('user_achievements')
-                .select('achievement_id')
-                .eq('user_id', user.id);
-            if (unlocked) setUnlockedIds(new Set((unlocked as UserAchievement[]).map(u => u.achievement_id)));
+            const [{ data: all }, { data: unlocked }] = await Promise.all([
+                supabase.from('achievements').select('*').order('created_at'),
+                supabase
+                    .from('user_achievements')
+                    .select('achievement_id, unlocked_at')
+                    .eq('user_id', user.id)
+            ]);
+
+            const nextAchievements = (all as Achievement[]) || [];
+            const unlockedRows = (unlocked as UserAchievement[]) || [];
+            const nextUnlockedIds = unlockedRows.map((row) => row.achievement_id);
+            const nextUnlockedAtById = unlockedRows.reduce<Record<string, string>>((acc, row) => {
+                acc[row.achievement_id] = row.unlocked_at;
+                return acc;
+            }, {});
+
+            setAchievements(nextAchievements);
+            setUnlockedIds(new Set(nextUnlockedIds));
+            setUnlockedAtById(nextUnlockedAtById);
+            writeCachedValue(cacheKey, {
+                achievements: nextAchievements,
+                unlockedIds: nextUnlockedIds,
+                unlockedAtById: nextUnlockedAtById,
+            }, STATIC_VIEW_CACHE_TTL_MS);
         };
         load();
     }, [user]);
+
+    const formatUnlockedAt = (value: string | undefined) => {
+        if (!value) return null;
+
+        return new Intl.DateTimeFormat(undefined, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        }).format(new Date(value));
+    };
 
     const rarityColors: Record<string, { border: string; bg: string; text: string }> = {
         common: { border: 'border-slate-600', bg: 'bg-slate-700', text: 'text-slate-400' },
@@ -46,15 +87,12 @@ export default function Achievements() {
 
     return (
         <div className="flex-1 flex flex-col animate-in fade-in duration-500">
-            {/* Header */}
-            <div className="px-4 pt-6 pb-3 flex items-center gap-3">
-                <button onClick={() => navigate('/dashboard')} className="text-slate-400 hover:text-white transition-colors p-1">
-                    <ArrowLeft className="w-6 h-6" />
-                </button>
-                <h1 className="font-heading text-2xl text-white">Character</h1>
-            </div>
+            <AppHeader
+                title="Character"
+                subtitle="Stats and milestones earned on your run."
+            />
 
-            <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-6">
+            <div className="flex-1 overflow-y-auto px-4 pt-4 pb-[calc(8rem+env(safe-area-inset-bottom))] space-y-6">
 
                 {/* Character Card */}
                 <div className="bg-slate-800 border border-slate-700 rounded-lg p-5 shadow-hud text-center">
@@ -103,6 +141,11 @@ export default function Achievements() {
                                     <p className={`text-xs font-medium ${isUnlocked ? 'text-white' : 'text-slate-500'}`}>{ach.title}</p>
                                     <p className="text-[10px] text-slate-500 mt-0.5">{ach.description}</p>
                                     <span className={`text-[10px] font-heading uppercase tracking-wider mt-1 inline-block ${rc.text}`}>{ach.rarity}</span>
+                                    {isUnlocked && (
+                                        <p className="mt-1 text-[10px] text-slate-400">
+                                            Earned {formatUnlockedAt(unlockedAtById[ach.id])}
+                                        </p>
+                                    )}
                                 </div>
                             );
                         })}
@@ -110,9 +153,6 @@ export default function Achievements() {
                 </div>
 
             </div>
-
-            {/* Bottom Navigation */}
-            <BottomNav />
         </div>
     );
 }
