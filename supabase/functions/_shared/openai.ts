@@ -32,7 +32,7 @@ export async function callOpenAI(
         max_tokens?: number;
         response_format?: { type: string };
     } = {},
-    retryConfig: { maxAttempts?: number; baseDelay?: number } = {}
+    retryConfig: { maxAttempts?: number; baseDelay?: number; requestTimeoutMs?: number } = {}
 ): Promise<string> {
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) {
@@ -41,17 +41,23 @@ export async function callOpenAI(
 
     const maxAttempts = retryConfig.maxAttempts ?? 3;
     const baseDelay = retryConfig.baseDelay ?? 1000;
+    const requestTimeoutMs = retryConfig.requestTimeoutMs ?? 25000;
 
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        let timeoutHandle: number | undefined;
         try {
+            const controller = new AbortController();
+            timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs);
+
             const response = await fetch(OPENAI_API_URL, {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
                 },
+                signal: controller.signal,
                 body: JSON.stringify({
                     model: options.model ?? "gpt-4o-mini",
                     messages,
@@ -84,16 +90,24 @@ export async function callOpenAI(
             return content;
 
         } catch (error) {
-            lastError = error instanceof Error ? error : new Error(String(error));
+            if (error instanceof Error && error.name === "AbortError") {
+                lastError = new Error(`OpenAI request timed out after ${requestTimeoutMs}ms.`);
+            } else {
+                lastError = error instanceof Error ? error : new Error(String(error));
+            }
 
             // Don't retry on non-retryable errors (e.g., auth errors, bad request)
-            if (attempt < maxAttempts - 1 && !(error instanceof Error && error.message.includes("OpenAI API error (4"))) {
+            if (attempt < maxAttempts - 1 && !isNonRetryableClientError(lastError)) {
                 const delay = baseDelay * Math.pow(2, attempt);
                 console.warn(`OpenAI call failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxAttempts}):`, String(error));
                 await sleep(delay);
                 continue;
             }
             throw lastError;
+        } finally {
+            if (timeoutHandle !== undefined) {
+                clearTimeout(timeoutHandle);
+            }
         }
     }
 
@@ -102,6 +116,10 @@ export async function callOpenAI(
 
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isNonRetryableClientError(error: Error): boolean {
+    return /^OpenAI API error \(4\d\d\):/.test(error.message);
 }
 
 // ============================================================
@@ -116,6 +134,7 @@ export function validateQuestResponse(raw: string): {
     daily_quests: QuestData[];
     side_quests: QuestData[];
     boss_quest: QuestData;
+    chain_quests: QuestData[];
 } {
     let parsed: Record<string, unknown>;
     try {
@@ -126,6 +145,7 @@ export function validateQuestResponse(raw: string): {
 
     const dailyQuests = Array.isArray(parsed.daily_quests) ? parsed.daily_quests : [];
     const sideQuests = Array.isArray(parsed.side_quests) ? parsed.side_quests : [];
+    const chainQuests = Array.isArray(parsed.chain_quests) ? parsed.chain_quests : [];
     const bossQuest = parsed.boss_quest && typeof parsed.boss_quest === "object" ? parsed.boss_quest : null;
 
     if (dailyQuests.length === 0) {
@@ -139,6 +159,7 @@ export function validateQuestResponse(raw: string): {
         daily_quests: dailyQuests.map(sanitizeQuest),
         side_quests: sideQuests.map(sanitizeQuest),
         boss_quest: sanitizeQuest(bossQuest as Record<string, unknown>),
+        chain_quests: chainQuests.map(sanitizeQuest).slice(0, 3),
     };
 }
 

@@ -65,7 +65,8 @@ serve(async (req) => {
         const supabase = createSupabaseClient(authHeader);
 
         // Get current user
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        const token = authHeader.replace("Bearer ", "");
+        const { data: { user }, error: userError } = await supabase.auth.getUser(token);
         if (userError || !user) {
             return new Response(
                 JSON.stringify({ error: "Unauthorized" }),
@@ -97,6 +98,7 @@ serve(async (req) => {
             .lt("expires_at", nowIso);
 
         const likesText = profile?.likes ? `\nThings they LIKE (great reward ideas): ${profile.likes}` : "";
+        const dislikesText = profile?.dislikes ? `\nThings they DISLIKE (AVOID suggesting these): ${profile.dislikes}` : "";
 
         // Call OpenAI
         const aiResponse = await callOpenAI(
@@ -104,7 +106,7 @@ serve(async (req) => {
                 { role: "system", content: SYSTEM_PROMPT },
                 {
                     role: "user",
-                    content: `Here is my daily routine:\n\n${profile.life_rhythm}${likesText}\n\nPlease generate 4 enticing items for the shop based on my lifestyle!`,
+                    content: `Here is my daily routine:\n\n${profile.life_rhythm}${likesText}${dislikesText}\n\nPlease generate 4 enticing items for the shop based on my lifestyle while avoiding things I dislike.`,
                 },
             ],
             {

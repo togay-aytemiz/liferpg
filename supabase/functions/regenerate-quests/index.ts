@@ -2,10 +2,10 @@
 // Edge Function: Regenerate quests when user updates their Life Rhythm in Settings.
 //
 // Flow:
-//   1. Deactivate all existing AI-generated quests for this user
-//   2. Update the user's life_rhythm in their profile
-//   3. Call OpenAI to generate new quests based on the updated text
-//   4. Optionally include completed quest history for smarter generation
+//   1. Read current context and previous quest history
+//   2. Call OpenAI to generate new quests
+//   3. Insert newly generated quests
+//   4. Deactivate old auto-generated quests only after successful insertion
 //
 // Auth: Requires valid Supabase JWT
 
@@ -84,7 +84,8 @@ serve(async (req) => {
         }
 
         const supabase = createSupabaseClient(authHeader);
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        const token = authHeader.replace("Bearer ", "");
+        const { data: { user }, error: userError } = await supabase.auth.getUser(token);
         if (userError || !user) {
             return new Response(
                 JSON.stringify({ error: "Unauthorized" }),
@@ -100,18 +101,23 @@ serve(async (req) => {
             );
         }
 
-        // 1. Deactivate existing AI-generated quests
-        await supabase
+        // Track current active auto-generated quests (exclude custom quests)
+        const { data: oldAiQuests, error: oldAiQuestError } = await supabase
             .from("quests")
-            .update({ is_active: false })
+            .select("id")
             .eq("user_id", user.id)
-            .eq("is_ai_generated", true);
+            .eq("is_ai_generated", true)
+            .eq("is_custom", false)
+            .eq("is_active", true);
 
-        // 2. Update user's life_rhythm in profile
-        await supabase
-            .from("profiles")
-            .update({ life_rhythm })
-            .eq("id", user.id);
+        if (oldAiQuestError) {
+            return new Response(
+                JSON.stringify({ error: "Failed to read existing quests", details: oldAiQuestError.message }),
+                { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        const oldAiQuestIds = (oldAiQuests ?? []).map((q: { id: string }) => q.id);
 
         // 3. Fetch completed quest history for context
         const { data: completedQuests } = await supabase
@@ -155,8 +161,27 @@ serve(async (req) => {
         const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
         const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
 
-        const habitsContext = active_habits && active_habits.length > 0
-            ? `\n\nI ALREADY HAVE THESE HABITS (Do NOT give me quests for these): ${active_habits.map((h: any) => `${h.title} (${h.frequency})`).join(", ")}`
+        const habitsFromRequest = Array.isArray(active_habits) ? active_habits.slice(0, 20) : [];
+        const { data: activeHabitsFromDb } = habitsFromRequest.length === 0
+            ? await supabase
+                .from("habits")
+                .select("title, frequency")
+                .eq("user_id", user.id)
+                .eq("is_active", true)
+                .limit(20)
+            : { data: null };
+
+        const resolvedActiveHabits = habitsFromRequest.length > 0 ? habitsFromRequest : (activeHabitsFromDb ?? []);
+
+        const habitsContext = resolvedActiveHabits.length > 0
+            ? `\n\nI ALREADY HAVE THESE HABITS (Do NOT give me quests for these): ${resolvedActiveHabits
+                .map((habit: unknown) => {
+                    const h = habit as Record<string, unknown>;
+                    const title = typeof h.title === "string" ? h.title : "Unnamed";
+                    const frequency = typeof h.frequency === "string" ? h.frequency : "daily";
+                    return `${title} (${frequency})`;
+                })
+                .join(", ")}`
             : "";
 
         // 4. Call OpenAI
@@ -180,7 +205,7 @@ serve(async (req) => {
 
         // Generate a chain_id for boss + chain quests
         const chainId = crypto.randomUUID();
-        const chainQuests = (generatedQuests as any).chain_quests || [];
+        const chainQuests = generatedQuests.chain_quests || [];
         const chainTotal = 1 + chainQuests.length; // boss = step 1
 
         // 5. Insert new quests — explicit field mapping, no raw AI spread
@@ -229,11 +254,11 @@ serve(async (req) => {
                 chain_total: chainTotal > 1 ? chainTotal : null,
             },
             // Chain follow-up quests (step 2, 3, ... — start LOCKED)
-            ...chainQuests.map((q: any, i: number) => ({
+            ...chainQuests.map((q, i: number) => ({
                 title: q.title || `Chain Step ${i + 2}`,
-                description: q.description || '',
+                description: q.description || "",
                 quest_type: 'boss',
-                difficulty: q.difficulty || 'hard',
+                difficulty: q.difficulty || "hard",
                 xp_reward: Number(q.xp_reward) || 80,
                 stat_affected: q.stat_affected || generatedQuests.boss_quest.stat_affected,
                 stat_points: Number(q.stat_points) || 3,
@@ -257,6 +282,27 @@ serve(async (req) => {
                 JSON.stringify({ error: "Failed to save quests", details: insertError.message }),
                 { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
+        }
+
+        // Update life rhythm and deactivate old generated quests after successful insert.
+        const { error: profileUpdateError } = await supabase
+            .from("profiles")
+            .update({ life_rhythm })
+            .eq("id", user.id);
+
+        if (profileUpdateError) {
+            console.warn("Failed to update life_rhythm during regeneration:", profileUpdateError.message);
+        }
+
+        if (oldAiQuestIds.length > 0) {
+            const { error: deactivateError } = await supabase
+                .from("quests")
+                .update({ is_active: false })
+                .in("id", oldAiQuestIds);
+
+            if (deactivateError) {
+                console.warn("Failed to deactivate old quests after regeneration:", deactivateError.message);
+            }
         }
 
         return new Response(

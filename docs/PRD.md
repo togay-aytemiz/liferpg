@@ -3,7 +3,7 @@
 **Product Name:** LifeRPG
 **Tagline:** Turn your life into a quest.
 
-> **Last Updated:** 2026-03-09
+> **Last Updated:** 2026-03-10
 
 ---
 
@@ -318,3 +318,13 @@ The core user loop:
 
 ## 🛠️ Tech Decisions
 *(Appendix for architectural choices and technical decisions - To be populated during development)*
+
+- **2026-03-10 - Auth Bootstrap Hardening:** The authentication initialization flow now keeps `onAuthStateChange` callback synchronous and defers async profile hydration, with explicit timeout guards for both `getSession` and profile fetch. This prevents indefinite loading states on route refresh (`/auth`, `/onboarding`) while preserving safe fallback behavior when network/auth calls stall.
+- **2026-03-10 - Auth Layout Simplification:** Removed the desktop-style centered shell (`max-width` container and root padding) so authentication screens render full-width mobile-first. Browser autofill colors are now explicitly themed to dark mode to prevent bright input backgrounds.
+- **2026-03-10 - Focus Toggle UX Consistency:** The onboarding focus preference now uses an RPG-themed, full-width toggle card placed under the field label (instead of an inline checkbox), and all related copy is English to maintain language consistency across the UI.
+- **2026-03-10 - Mobile Safe-Area Scroll Handling:** Onboarding now uses a single vertical scroll flow (no nested internal scroller) with explicit bottom safe-area spacing and `viewport-fit=cover`, ensuring action buttons remain fully visible on mobile devices with bottom browser/system UI overlays.
+- **2026-03-10 - Controlled Typography Emphasis:** Cinzel accent usage was expanded to selected form labels and key action buttons to reinforce RPG tone while preserving Inter for long-form readability and input content.
+- **2026-03-10 - Viewport Shell Stabilization:** The root app shell now uses a fixed viewport-height container (`h-screen` + `100dvh`) with a dedicated internal `overflow-y-auto` region. This prevents mobile pages from losing vertical scroll when body overflow is intentionally locked.
+- **2026-03-10 - Label Copy Compression:** Onboarding focus prompt copy was shortened to "What should we focus on?" to improve readability and reduce visual noise.
+- **2026-03-10 - Onboarding Prompt Scope Alignment:** The onboarding helper sentence now references both routine and preferences, matching the full data collected by the form (likes, dislikes, and focus areas) while remaining concise.
+- **2026-03-10 - LLM Reliability Standards:** AI generation now uses stronger consistency guards: chain quest payloads are preserved through validation, active-habit/dislike context is supplied across generation paths, custom quest creation uses shared retry/sanitization logic, OpenAI calls now use bounded request timeouts with retry, rewards refresh no longer risks pre-delete data loss, and regeneration no longer deactivates existing auto quests until new quests are successfully inserted.

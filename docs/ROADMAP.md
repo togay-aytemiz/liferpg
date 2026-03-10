@@ -1,6 +1,6 @@
 # Roadmap - lifeRPG
 
-> **Last Updated:** 2026-03-09
+> **Last Updated:** 2026-03-10
 
 This document tracks the structured phases of development for the lifeRPG project, based on the MVP scope outlined in the PRD.
 
@@ -28,6 +28,15 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Quest Screen:** Dedicated view for Daily, Side, and Boss quests.
 - [x] **Settings Screen:** Section to edit "Life Rhythm" and regenerate quests.
 - [x] **Character & Achievement Screens:** Detailed views for stats and unlocked badges.
+- [x] **Auth Refresh Stability:** Prevented `/auth` and `/onboarding` refresh spinner lock by hardening auth session/profile bootstrap flow.
+- [x] **Mobile-First Auth Surface Cleanup:** Removed desktop-like centered wrapper/shell and fixed bright browser autofill styling on auth inputs.
+- [x] **Onboarding Focus Toggle Polish:** Rebuilt the "Surprise me" control as an RPG-themed full-width toggle card below the label and standardized the copy to English.
+- [x] **Onboarding Mobile Scroll Safety:** Removed nested scroll in onboarding and added stronger safe-area bottom spacing so the submit section remains reachable above phone bottom bars.
+- [x] **Typography Accent Expansion:** Extended Cinzel-based accent usage to key form labels and utility actions (without replacing body copy) for stronger RPG identity.
+- [x] **Viewport Scroll Lock Fix:** Switched app shell to fixed viewport-height (`100dvh`) with an explicit internal scroller to reliably enable vertical scroll on mobile onboarding.
+- [x] **Focus Label Copy Tightening:** Shortened focus question copy from a long sentence to "What should we focus on?" for cleaner scanability.
+- [x] **Onboarding Intro Copy Refinement:** Rewrote helper text to cover routine plus user preferences (likes/dislikes/focus) in a short, consistent sentence.
+- [x] **LLM Backbone Hardening:** Fixed quest-chain JSON parsing, ensured active habit/dislike context is consistently injected, unified custom quest generation with shared OpenAI helper, added OpenAI request timeout/retry hardening, protected rewards regeneration from pre-delete data loss, and reduced regeneration failure blast-radius.
 - [ ] Testing, QA, and bug fixing.
 - [ ] Final UI/UX polish (ensure it feels like an RPG HUD).
 

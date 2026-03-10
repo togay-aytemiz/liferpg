@@ -105,7 +105,8 @@ serve(async (req) => {
         const supabase = createSupabaseClient(authHeader);
 
         // Get current user
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        const token = authHeader.replace("Bearer ", "");
+        const { data: { user }, error: userError } = await supabase.auth.getUser(token);
         if (userError || !user) {
             return new Response(
                 JSON.stringify({ error: "Unauthorized" }),
@@ -114,7 +115,7 @@ serve(async (req) => {
         }
 
         // Parse request body
-        const { life_rhythm } = await req.json();
+        const { life_rhythm, active_habits } = await req.json();
         if (!life_rhythm || typeof life_rhythm !== "string") {
             return new Response(
                 JSON.stringify({ error: "life_rhythm is required" }),
@@ -132,12 +133,35 @@ serve(async (req) => {
         const likesText = profile?.likes ? `\nWhat I LIKE/ENJOY: ${profile.likes}` : "";
         const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
         const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
+        const habitsFromRequest = Array.isArray(active_habits) ? active_habits.slice(0, 20) : [];
+
+        const { data: activeHabitsFromDb } = habitsFromRequest.length === 0
+            ? await supabase
+                .from("habits")
+                .select("title, frequency")
+                .eq("user_id", user.id)
+                .eq("is_active", true)
+                .limit(20)
+            : { data: null };
+
+        const resolvedActiveHabits = habitsFromRequest.length > 0 ? habitsFromRequest : (activeHabitsFromDb ?? []);
+
+        const habitsContext = resolvedActiveHabits.length > 0
+            ? `\n\nI ALREADY HAVE THESE HABITS (Do NOT give me quests for these): ${resolvedActiveHabits
+                .map((habit: unknown) => {
+                    const h = habit as Record<string, unknown>;
+                    const title = typeof h.title === "string" ? h.title : "Unnamed";
+                    const frequency = typeof h.frequency === "string" ? h.frequency : "daily";
+                    return `${title} (${frequency})`;
+                })
+                .join(", ")}`
+            : "";
 
         // Call OpenAI to generate quests
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}\n\nPlease generate quests highly tailored to this routine, my focus areas, and my likes. Strictly AVOID what I hate! Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).` },
+                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${habitsContext}\n\nPlease generate quests highly tailored to this routine, my focus areas, and my likes. Strictly AVOID what I hate! Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).` },
             ],
             {
                 model: "gpt-4o-mini",
@@ -152,7 +176,7 @@ serve(async (req) => {
 
         // Generate a chain_id for boss + chain quests
         const chainId = crypto.randomUUID();
-        const chainQuests = (generatedQuests as any).chain_quests || [];
+        const chainQuests = generatedQuests.chain_quests || [];
         const chainTotal = 1 + chainQuests.length; // boss = step 1
 
         // Prepare quests for database insertion — only known columns
@@ -201,11 +225,11 @@ serve(async (req) => {
                 chain_total: chainTotal > 1 ? chainTotal : null,
             },
             // Chain follow-up quests (step 2, 3, ... — start LOCKED)
-            ...chainQuests.map((q: any, i: number) => ({
+            ...chainQuests.map((q, i: number) => ({
                 title: q.title || `Chain Step ${i + 2}`,
-                description: q.description || '',
+                description: q.description || "",
                 quest_type: 'boss',
-                difficulty: q.difficulty || 'hard',
+                difficulty: q.difficulty || "hard",
                 xp_reward: Number(q.xp_reward) || 80,
                 stat_affected: q.stat_affected || generatedQuests.boss_quest.stat_affected,
                 stat_points: Number(q.stat_points) || 3,

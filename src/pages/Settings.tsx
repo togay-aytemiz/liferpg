@@ -105,7 +105,7 @@ export default function Settings() {
                 <div className="space-y-4">
                     <h2 className="font-heading text-lg text-slate-300">Profile</h2>
                     <div>
-                        <label htmlFor="username" className="text-sm text-slate-400 ml-1 block mb-1">Username</label>
+                        <label htmlFor="username" className="text-[0.85rem] font-heading tracking-wide text-slate-400 ml-1 block mb-1">Username</label>
                         <input
                             id="username"
                             type="text"
@@ -118,7 +118,7 @@ export default function Settings() {
                     <button
                         onClick={handleSaveProfile}
                         disabled={saving}
-                        className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                        className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2.5 rounded-lg text-sm font-heading tracking-wide transition-colors disabled:opacity-50"
                     >
                         {saving ? (
                             <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
@@ -140,7 +140,7 @@ export default function Settings() {
                     </p>
                     <div className="space-y-3">
                         <div>
-                            <label className="text-sm text-slate-400 ml-1 block mb-1">Your Daily Routine <span className="text-red-400">*</span></label>
+                            <label className="text-[0.85rem] font-heading tracking-wide text-slate-400 ml-1 block mb-1">Your Daily Routine <span className="text-red-400">*</span></label>
                             <textarea
                                 value={lifeRhythm}
                                 onChange={(e) => setLifeRhythm(e.target.value)}
@@ -150,7 +150,7 @@ export default function Settings() {
                         </div>
 
                         <div>
-                            <label className="text-sm text-slate-400 ml-1 block mb-1">What do you enjoy doing? (Likes)</label>
+                            <label className="text-[0.85rem] font-heading tracking-wide text-slate-400 ml-1 block mb-1">What do you enjoy doing? (Likes)</label>
                             <textarea
                                 value={likes}
                                 onChange={(e) => setLikes(e.target.value)}
@@ -160,7 +160,7 @@ export default function Settings() {
                         </div>
 
                         <div>
-                            <label className="text-sm text-slate-400 ml-1 block mb-1">What do you hate doing? (Dislikes)</label>
+                            <label className="text-[0.85rem] font-heading tracking-wide text-slate-400 ml-1 block mb-1">What do you hate doing? (Dislikes)</label>
                             <textarea
                                 value={dislikes}
                                 onChange={(e) => setDislikes(e.target.value)}
@@ -170,7 +170,7 @@ export default function Settings() {
                         </div>
 
                         <div>
-                            <label className="text-sm text-slate-400 ml-1 block mb-1">What do you want to improve? (Focus Areas)</label>
+                            <label className="text-[0.85rem] font-heading tracking-wide text-slate-400 ml-1 block mb-1">What do you want to improve? (Focus Areas)</label>
                             <textarea
                                 value={focusAreas}
                                 onChange={(e) => setFocusAreas(e.target.value)}
@@ -210,7 +210,7 @@ export default function Settings() {
                 <div className="pt-4 border-t border-slate-800">
                     <button
                         onClick={handleSignOut}
-                        className="w-full flex items-center justify-center gap-2 bg-red-900/30 hover:bg-red-900/50 border border-red-900/50 text-red-400 py-3 rounded-lg text-sm font-medium transition-colors"
+                        className="w-full flex items-center justify-center gap-2 bg-red-900/30 hover:bg-red-900/50 border border-red-900/50 text-red-400 py-3 rounded-lg text-sm font-heading tracking-wide transition-colors"
                     >
                         <LogOut className="w-4 h-4" />
                         Sign Out

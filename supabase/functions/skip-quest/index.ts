@@ -17,6 +17,12 @@ import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 import { callOpenAI } from "../_shared/openai.ts";
 
 const MAX_DAILY_SKIPS = 3;
+const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
+const VALID_STATS = new Set(["strength", "knowledge", "wealth", "adventure", "social"]);
+
+function clamp(val: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, val));
+}
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -33,7 +39,8 @@ serve(async (req) => {
         }
 
         const supabase = createSupabaseClient(authHeader);
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        const token = authHeader.replace("Bearer ", "");
+        const { data: { user }, error: userError } = await supabase.auth.getUser(token);
         if (userError || !user) {
             return new Response(
                 JSON.stringify({ error: "Unauthorized" }),
@@ -52,6 +59,21 @@ serve(async (req) => {
         if (!reason || typeof reason !== "string") {
             return new Response(
                 JSON.stringify({ error: "reason is required (why are you skipping?)" }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        const safeReason = reason.trim();
+        if (!safeReason) {
+            return new Response(
+                JSON.stringify({ error: "reason is required (why are you skipping?)" }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        if (safeReason.length > 280) {
+            return new Response(
+                JSON.stringify({ error: "reason is too long (max 280 chars)" }),
                 { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
@@ -103,7 +125,7 @@ serve(async (req) => {
                 is_completed: false,
                 xp_awarded: 0,
                 gold_awarded: 0,
-                skip_reason: reason,
+                skip_reason: safeReason,
             }, { onConflict: "user_id,quest_id,quest_date" });
 
         // 4. Deactivate the quest so it no longer appears
@@ -184,7 +206,7 @@ serve(async (req) => {
         const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
         const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
 
-        const replacementPrompt = `You are a game master for LifeRPG. The user just skipped a ${quest.quest_type} quest titled "${quest.title}" because: "${reason}".
+        const replacementPrompt = `The user just skipped a ${quest.quest_type} quest titled "${quest.title}" because: "${safeReason}".
         
 Your job is to generate EXACTLY ONE replacement ${quest.quest_type} quest that fits their routine but AVOIDS what they disliked. Feel free to make it a meaningful "Avoidance/Negative" goal (e.g., "Do not smoke", "No sugar today") that tests their willpower if it fits their profile.
 
@@ -207,23 +229,43 @@ Return valid JSON:
         let newQuest = null;
         try {
             const aiResponse = await callOpenAI(
-                [{ role: "system", content: replacementPrompt }],
+                [
+                    {
+                        role: "system",
+                        content: "You are a LifeRPG quest designer. Generate exactly ONE replacement quest as valid JSON only. Never return markdown.",
+                    },
+                    { role: "user", content: replacementPrompt },
+                ],
                 { model: "gpt-4o-mini", temperature: 0.8, response_format: { type: "json_object" } }
             );
 
-            const generated = JSON.parse(aiResponse);
+            const generated = JSON.parse(aiResponse) as Record<string, unknown>;
+
+            const difficultyRaw = typeof generated.difficulty === "string" ? generated.difficulty : "medium";
+            const statRaw = typeof generated.stat_affected === "string" ? generated.stat_affected : "strength";
+
+            const safeTitle = typeof generated.title === "string"
+                ? generated.title.trim().slice(0, 200)
+                : "Mystery Quest";
+            const safeDescription = typeof generated.description === "string"
+                ? generated.description.trim().slice(0, 500)
+                : "";
+            const safeDifficulty = VALID_DIFFICULTIES.has(difficultyRaw) ? difficultyRaw : "medium";
+            const safeStat = VALID_STATS.has(statRaw) ? statRaw : "strength";
+            const safeXp = clamp(Number(generated.xp_reward) || 15, 5, 120);
+            const safePoints = clamp(Number(generated.stat_points) || 1, 1, 5);
 
             // Insert the replacement quest
             const { data: insertedQuest } = await supabase
                 .from("quests")
                 .insert({
-                    title: generated.title || "Mystery Quest",
-                    description: generated.description || "",
+                    title: safeTitle || "Mystery Quest",
+                    description: safeDescription,
                     quest_type: quest.quest_type, // keep same type as skipped
-                    difficulty: generated.difficulty || "medium",
-                    xp_reward: Number(generated.xp_reward) || 15,
-                    stat_affected: generated.stat_affected || "strength",
-                    stat_points: Number(generated.stat_points) || 1,
+                    difficulty: safeDifficulty,
+                    xp_reward: safeXp,
+                    stat_affected: safeStat,
+                    stat_points: safePoints,
                     user_id: user.id,
                     is_ai_generated: true,
                     is_active: true,
@@ -242,7 +284,7 @@ Return valid JSON:
             JSON.stringify({
                 success: true,
                 skipped_quest: quest.title,
-                skip_reason: reason,
+                skip_reason: safeReason,
                 remaining_skips: remainingSkips,
                 max_skips: MAX_DAILY_SKIPS,
                 message: newQuest

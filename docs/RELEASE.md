@@ -30,6 +30,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Replaced Vite boilerplate with RPG-themed application
+- Expanded Cinzel accent typography to selected onboarding/settings labels and utility actions for a stronger RPG feel without overusing display font in body copy.
+- Refined onboarding intro helper copy to reflect both routine and preference inputs in a concise sentence.
+- Unified custom quest generation with the shared OpenAI helper + sanitization path for consistent retry/error behavior.
 
 ### Fixed
-- N/A
+- **Auth Refresh Spinner Lock:** Fixed an auth bootstrap edge case where refreshing `/auth` or `/onboarding` could leave the app stuck in a perpetual spinner. `AuthContext` now avoids async work directly inside Supabase auth callbacks and applies timeout guards during initial session/profile hydration.
+- **Auth Wrapper / Input Contrast:** Removed the desktop-style wrapper effect on auth pages (center shell + shadow feel) and fixed bright browser autofill backgrounds so inputs stay dark-themed.
+- **Onboarding Surprise Toggle Styling:** Replaced the plain inline checkbox with an RPG-themed full-width toggle card, moved it below the focus label, and converted Turkish copy to English for UI consistency.
+- **Onboarding Bottom Reachability:** Fixed mobile onboarding where the bottom action area could be obstructed by device/browser bottom bars by removing nested form scrolling, adding stronger safe-area padding, and enabling `viewport-fit=cover`.
+- **Mobile Vertical Scroll Reliability:** Fixed remaining onboarding scroll lock by constraining the app shell to viewport height and keeping scrolling inside an explicit internal container.
+- **Focus Prompt Copy:** Shortened the focus question to "What should we focus on?" for a cleaner, faster read.
+- **LLM Prompt/Context Integrity:** Fixed lost `chain_quests` parsing, ensured habits/dislikes context is passed into generation prompts, normalized reward milestone levels (3/5/7/10/12/15), added OpenAI request timeout guards, prevented reward refresh from deleting old rewards before successful insert, and reduced regenerate failure impact by deactivating old auto-generated quests only after successful insert of new ones.

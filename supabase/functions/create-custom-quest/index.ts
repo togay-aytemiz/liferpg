@@ -1,10 +1,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { callOpenAI } from "../_shared/openai.ts";
+import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 
-const corsHeaders = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const VALID_TYPES = new Set(["daily", "side", "boss"]);
+const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
+const VALID_STATS = new Set(["strength", "knowledge", "wealth", "adventure", "social"]);
+const MAX_PROMPT_LENGTH = 500;
+
+function clamp(val: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, val));
+}
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -12,154 +17,135 @@ serve(async (req) => {
     }
 
     try {
-        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-        const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-        const openAiKey = Deno.env.get("OPENAI_API_KEY");
-
-        if (!openAiKey) throw new Error("Missing OPENAI_API_KEY");
-
         const authHeader = req.headers.get("Authorization");
-        if (!authHeader) throw new Error("No authorization header");
+        if (!authHeader) {
+            return new Response(
+                JSON.stringify({ error: "Missing authorization header" }),
+                { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
 
-        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-            global: { headers: { Authorization: authHeader } },
-        });
+        const supabase = createSupabaseClient(authHeader);
+        const token = authHeader.replace("Bearer ", "");
+        const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+        if (userError || !user) {
+            return new Response(
+                JSON.stringify({ error: "Unauthorized" }),
+                { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
 
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError || !user) throw new Error("Unauthorized");
-
-        const { prompt, quest_type, active_habits } = await req.json();
-
-        if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+        const { prompt, quest_type } = await req.json();
+        if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
             return new Response(
                 JSON.stringify({ error: "Prompt is required" }),
                 { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
 
-        const validTypes = ['daily', 'side', 'boss'];
-        const targetType = validTypes.includes(quest_type) ? quest_type : 'side';
-
-        // AI Prompt to evaluate the custom user goal
-        const systemPrompt = `You are a game master for a real-life habit tracker RPG.
-The user wants to add a CUSTOM quest (type: ${targetType}) to their list.
-Their raw input is: "${prompt}"
-
-Your job is to parse this input and determine the RPG attributes for it.
-
-CRITICAL AVOIDANCE/NEGATIVE GOAL RULES:
-Check if the user's input is about NOT doing something (e.g., "Don't smoke", "Less than 2 hours screen time", "No sugar today").
-If it is an Avoidance Goal:
-- Treat it like a willpower challenge.
-- The stat affected should generally be "strength" (representing willpower) or whatever makes sense.
-- The title should frame it as a challenge (e.g., "Resist the urge to smoke", "Digital Detox Challenge").
-- The description should be motivating and confirm it is an avoidance goal.
-
-CONTEXT AWARENESS:
-The user already has the following active habits: ${active_habits ? active_habits.map((h: any) => `${h.title} (${h.frequency})`).join(", ") : "None"}.
-If their custom prompt is too similar to an existing habit, you should still allow it but perhaps make the title distinct or ensure the stats complement it.
-
-Return EXACTLY ONE JSON object with no markdown formatting. It must match this exact structure:
-{
-  "title": "Actionable, game-like title for the quest",
-  "description": "Short, motivating description (max 2 sentences)",
-  "difficulty": "easy", // Must be "easy", "medium", "hard", or "epic"
-  "stat_affected": "strength", // Must be "strength", "knowledge", "wealth", "adventure", or "social"
-  "xp_reward": 15, // Integer between 5 and 100 based on difficulty
-  "gold_reward": 5, // Integer between 0 and 50 based on difficulty
-  "is_avoidance": true // true if it's a negative/avoidance goal, else false
-}`;
-
-        // Helper function for OpenAI call with retry logic
-        async function callOpenAI(sysPrompt: string, retries = 3, baseDelay = 1000): Promise<any> {
-            for (let attempt = 0; attempt <= retries; attempt++) {
-                try {
-                    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${openAiKey}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({
-                            model: "gpt-4o-mini",
-                            messages: [
-                                { role: "system", content: sysPrompt }
-                            ],
-                            temperature: 0.7,
-                            response_format: { type: "json_object" }
-                        }),
-                    });
-
-                    if (!response.ok) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const status = response.status;
-
-                        // Retryable errors: Rate limits (429) and Server Errors (5xx)
-                        if ((status === 429 || status >= 500) && attempt < retries) {
-                            const delayMs = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s...
-                            console.warn(`OpenAI API error ${status}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${retries})...`);
-                            await new Promise(resolve => setTimeout(resolve, delayMs));
-                            continue; // Try next iteration
-                        }
-
-                        // Non-retryable error or out of retries
-                        throw new Error(`OpenAI API error: ${status} - ${JSON.stringify(errorData)}`);
-                    }
-
-                    const data = await response.json();
-                    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-                        throw new Error("Invalid response structure from OpenAI");
-                    }
-                    return data;
-                } catch (error: any) {
-                    if (attempt >= retries) {
-                        throw error;
-                    }
-                    const delayMs = baseDelay * Math.pow(2, attempt);
-                    console.warn(`Network/Parse error: ${error.message}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${retries})...`);
-                    await new Promise(resolve => setTimeout(resolve, delayMs));
-                }
-            }
+        if (prompt.trim().length > MAX_PROMPT_LENGTH) {
+            return new Response(
+                JSON.stringify({ error: `Prompt is too long. Maximum ${MAX_PROMPT_LENGTH} characters.` }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
         }
 
-        const openAiResponse = await callOpenAI(systemPrompt);
-        const resultText = openAiResponse.choices[0].message.content;
+        const targetType = VALID_TYPES.has(String(quest_type)) ? String(quest_type) : "side";
 
-        let questData;
+        // Read active habits server-side for trustworthy context.
+        const { data: activeHabits } = await supabase
+            .from("habits")
+            .select("title, frequency")
+            .eq("user_id", user.id)
+            .eq("is_active", true)
+            .limit(20);
+
+        const habitsContext = activeHabits && activeHabits.length > 0
+            ? activeHabits.map((h: { title: string; frequency: string }) => `${h.title} (${h.frequency})`).join(", ")
+            : "None";
+
+        const systemPrompt = `You are a game master for a real-life habit tracker RPG.
+The user wants to add ONE custom quest (type: ${targetType}).
+
+CRITICAL AVOIDANCE RULE:
+If the user's request is about NOT doing something (e.g. "don't smoke", "less than 1 hour social media"), treat it as a willpower challenge.
+For avoidance goals, prefer stat_affected = "strength" unless another stat is clearly better.
+
+The user already has these active habits: ${habitsContext}
+If the request overlaps an existing habit, keep the quest but make it distinct/complementary.
+
+Return EXACTLY one JSON object with this structure:
+{
+  "title": "short actionable quest title",
+  "description": "1-2 short motivating sentences",
+  "difficulty": "easy|medium|hard|epic",
+  "stat_affected": "strength|knowledge|wealth|adventure|social",
+  "xp_reward": 15,
+  "gold_reward": 5,
+  "is_avoidance": false
+}`;
+
+        const userPrompt = `User custom quest request:\n${prompt.trim()}`;
+
+        const aiResponse = await callOpenAI(
+            [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+            ],
+            {
+                model: "gpt-4o-mini",
+                temperature: 0.7,
+                max_tokens: 700,
+                response_format: { type: "json_object" },
+            }
+        );
+
+        let parsed: Record<string, unknown>;
         try {
-            questData = JSON.parse(resultText);
-        } catch (e) {
-            console.error("Failed to parse OpenAI response as JSON:", resultText);
+            parsed = JSON.parse(aiResponse);
+        } catch {
+            console.error("Failed to parse AI response as JSON:", aiResponse);
             throw new Error("AI returned invalid JSON format.");
         }
 
-        // Validate basic fields
-        if (!questData.title || !questData.difficulty || !questData.stat_affected || typeof questData.xp_reward !== 'number') {
-            throw new Error("Missing required fields from AI response.");
-        }
+        const titleRaw = typeof parsed.title === "string" ? parsed.title.trim() : "";
+        const descriptionRaw = typeof parsed.description === "string" ? parsed.description.trim() : "";
+        const difficultyRaw = typeof parsed.difficulty === "string" ? parsed.difficulty : "medium";
+        const statRaw = typeof parsed.stat_affected === "string" ? parsed.stat_affected : "strength";
+        const isAvoidance = parsed.is_avoidance === true;
 
-        // Insert new custom quest into database
+        const title = titleRaw.length > 0 ? titleRaw.slice(0, 200) : "Custom Quest";
+        const description = descriptionRaw.slice(0, 500);
+        const difficulty = VALID_DIFFICULTIES.has(difficultyRaw) ? difficultyRaw : "medium";
+        const stat_affected = VALID_STATS.has(statRaw)
+            ? statRaw
+            : isAvoidance
+                ? "strength"
+                : "knowledge";
+        const xp_reward = clamp(Number(parsed.xp_reward) || 15, 5, 100);
+        const gold_reward = clamp(Number(parsed.gold_reward) || 0, 0, 50);
+
         const { data: newQuest, error: insertError } = await supabase
             .from("quests")
             .insert({
                 user_id: user.id,
                 quest_type: targetType,
-                title: questData.title,
-                description: questData.description,
-                difficulty: questData.difficulty,
-                xp_reward: questData.xp_reward,
-                gold_reward: questData.gold_reward || 0,
-                stat_affected: questData.stat_affected,
+                title,
+                description,
+                difficulty,
+                xp_reward,
+                gold_reward,
+                stat_affected,
                 stat_points: 1,
                 is_active: true,
-                is_ai_generated: true, // It was evaluated by AI
-                is_custom: true, // Created manually by user
+                is_ai_generated: true,
+                is_custom: true,
             })
             .select()
             .single();
 
         if (insertError || !newQuest) {
-            throw new Error(`Failed to insert modern quest: ${insertError?.message}`);
+            throw new Error(`Failed to insert custom quest: ${insertError?.message}`);
         }
 
         return new Response(

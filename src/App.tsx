@@ -8,7 +8,6 @@ import Quests from './pages/Quests';
 import Achievements from './pages/Achievements';
 import Settings from './pages/Settings';
 import Shop from './pages/Shop';
-import './App.css';
 
 // ProtectedRoute: Redirect to /auth if not logged in
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -109,8 +108,8 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <div className="min-h-screen bg-slate-900 text-slate-50 font-body antialiased flex flex-col items-center selection:bg-amber-500/30">
-          <div className="w-full max-w-md min-h-screen bg-slate-900 shadow-2xl relative overflow-hidden flex flex-col">
+        <div className="h-screen h-[100dvh] w-full overflow-hidden bg-slate-900 text-slate-50 font-body antialiased selection:bg-amber-500/30">
+          <div className="h-full w-full relative overflow-x-hidden overflow-y-auto overscroll-y-contain flex flex-col">
             <AppRoutes />
           </div>
         </div>

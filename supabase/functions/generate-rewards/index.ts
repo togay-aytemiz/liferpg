@@ -67,7 +67,8 @@ serve(async (req) => {
         }
 
         const supabase = createSupabaseClient(authHeader);
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        const token = authHeader.replace("Bearer ", "");
+        const { data: { user }, error: userError } = await supabase.auth.getUser(token);
         if (userError || !user) {
             return new Response(
                 JSON.stringify({ error: "Unauthorized" }),
@@ -89,10 +90,14 @@ serve(async (req) => {
             );
         }
 
+        const likesText = profile?.likes ? `\nLikes: ${profile.likes}` : "";
+        const dislikesText = profile?.dislikes ? `\nDislikes (avoid these): ${profile.dislikes}` : "";
+        const focusText = profile?.focus_areas ? `\nFocus areas: ${profile.focus_areas}` : "";
+
         // Build context for AI
         const userContext = `Daily routine: ${profile.life_rhythm}
 Current level: ${profile.level}
-Stats - Strength: ${profile.stat_strength}, Knowledge: ${profile.stat_knowledge}, Wealth: ${profile.stat_wealth}, Adventure: ${profile.stat_adventure}, Social: ${profile.stat_social}`;
+Stats - Strength: ${profile.stat_strength}, Knowledge: ${profile.stat_knowledge}, Wealth: ${profile.stat_wealth}, Adventure: ${profile.stat_adventure}, Social: ${profile.stat_social}${likesText}${dislikesText}${focusText}`;
 
         // Call OpenAI
         const aiResponse = await callOpenAI(
@@ -110,14 +115,36 @@ Stats - Strength: ${profile.stat_strength}, Knowledge: ${profile.stat_knowledge}
 
         const generated = validateRewardResponse(aiResponse);
 
-        // Delete old rewards for this user (replace with fresh AI-generated ones)
-        await supabase
+        // Enforce exact milestone levels to keep progression predictable.
+        const milestoneLevels = [3, 5, 7, 10, 12, 15];
+        const normalizedRewards = milestoneLevels.map((level, idx) => {
+            const fallback = generated.rewards[generated.rewards.length - 1];
+            const source = generated.rewards[idx] ?? fallback;
+            return {
+                title: source?.title ?? `Level ${level} Reward`,
+                description: source?.description ?? "A meaningful reward for your progress.",
+                unlock_level: level,
+            };
+        });
+
+        // Read existing rewards first so we can safely remove only old rows
+        // after new rows are inserted.
+        const { data: oldRewards, error: oldRewardsError } = await supabase
             .from("rewards")
-            .delete()
+            .select("id")
             .eq("user_id", user.id);
 
+        if (oldRewardsError) {
+            return new Response(
+                JSON.stringify({ error: "Failed to read existing rewards", details: oldRewardsError.message }),
+                { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        const oldRewardIds = (oldRewards ?? []).map((reward: { id: string }) => reward.id);
+
         // Insert new rewards — only whitelisted fields from validation
-        const rewardsToInsert = generated.rewards.map(r => ({
+        const rewardsToInsert = normalizedRewards.map(r => ({
             user_id: user.id,
             title: r.title,
             description: r.description,
@@ -135,6 +162,17 @@ Stats - Strength: ${profile.stat_strength}, Knowledge: ${profile.stat_knowledge}
                 JSON.stringify({ error: "Failed to save rewards", details: insertError.message }),
                 { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
+        }
+
+        if (oldRewardIds.length > 0) {
+            const { error: deleteOldError } = await supabase
+                .from("rewards")
+                .delete()
+                .in("id", oldRewardIds);
+
+            if (deleteOldError) {
+                console.warn("Failed to delete old rewards after regeneration:", deleteOldError.message);
+            }
         }
 
         return new Response(
