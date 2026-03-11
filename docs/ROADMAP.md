@@ -38,6 +38,11 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Onboarding Intro Copy Refinement:** Rewrote helper text to cover routine plus user preferences (likes/dislikes/focus) in a short, consistent sentence.
 - [x] **Loading Screen Messaging Refresh:** Removed the unreliable quest-generation progress bar and replaced it with rotating RPG-themed status lines while generation runs.
 - [x] **Loading Flow Polish:** Removed the bottom "Did you know?" block, slowed status-line rotation, and added smooth fade transitions between loading messages.
+- [x] **Bazaar Inventory Density Polish:** Moved the inventory helper copy below the section title and compacted owned-item cards so purchased goods read more cleanly on mobile.
+- [x] **Quest Stat Badge Alignment:** Moved quest stat context above quest titles and aligned it with the Character screen's icon language using a subtler badge style.
+- [x] **Pixel HUD Resource Bars:** Reworked the dashboard XP and HP meters into retro segmented HUD bars with icon badges and stronger game-like framing.
+- [x] **Quest Stat Eyebrow Simplification:** Removed the pill-style quest stat chip and reduced it to a plain eyebrow line so quest cards stay denser.
+- [x] **Bazaar Static Goods Parity:** Aligned the `Magical Goods` section heading with the other Bazaar headers and normalized stackable inventory rendering for owned static goods.
 - [x] **Loading Copy Simplification:** Removed the redundant static helper sentence under "Generating your quests..." so the rotating RPG status line becomes the single source of loading feedback.
 - [x] **Loading Subtitle Alignment:** Pulled the rotating status line up to sit directly under the loading title, making it read like an RPG-styled subtitle instead of a detached secondary block.
 - [x] **Edge Auth Retry Guard:** Added token-forwarded edge invokes with one-shot session refresh retry on 401 to prevent quest-generation stalls from transient auth expiry.
@@ -71,8 +76,11 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Habit Card Alignment:** Habit cards now follow the same interaction language as quest cards, with a square log control on the left and a cleaner secondary action menu for removal.
 - [x] **Habit Completion Clarity:** Habit cards now show today's logged state more explicitly, surface visible XP/penalty metadata, and move helper copy into a quest-like subtitle line under the title.
 - [x] **Habit Completion Badge Simplification:** Habit cards no longer repeat a separate `Done Today` pill when the left checkbox already communicates the completed-for-today state.
+- [x] **Habit Stat Eyebrow Alignment:** Habit cards now place stat gain/context above the title using the same plain icon eyebrow language as quest cards, instead of repeating that information as a separate lower badge.
 - [x] **Quest Gold Economy Clarity:** Quest cards and completion feedback now show gold rewards, quest generation awards meaningful gold across daily/side/boss content, and the Bazaar copy explicitly ties spending to quest earnings.
 - [x] **Protected Tab Read Cache:** Dashboard, Quests, Bazaar, Awards, and Habits now reuse short-lived client caches while hopping between bottom-nav tabs, so idle navigation does not re-hit Supabase on every remount.
+- [x] **Fetch Dedup Hardening:** Edge auth now uses local-session-first checks, Dashboard/Habits share one cached habit snapshot, streak/runtime reads reuse in-flight loaders, and authenticated daily settlement is throttled so idle remounts/visibility changes do not spam Supabase.
+- [x] **Persistent Streak Cache:** Dashboard streak reads now survive full browser refreshes via a narrow localStorage-backed cache path, avoiding an unnecessary `streaks` read on every reload while still invalidating immediately after real streak mutations.
 - [x] **Bazaar Offer Stability:** Weekly personalized Bazaar offers now persist client-side for their full lifetime, `generate-shop` reuses active unexpired offers instead of regenerating them, and duplicate active offer categories are cleaned up so the same offer type does not appear twice at once.
 - [x] **Shared Protected Page Headers:** Quests, Bazaar, Character, and Settings now use the same sticky white header treatment; compact HUD labels can stay abbreviated (`CHAR`) while the page itself uses the full `Character` title.
 - [x] **Daily Reroll Visibility:** The quest `... more` menu now shows how many alternate daily rerolls remain in the current pool and explicitly says when today's pool has no rerolls left.
@@ -83,13 +91,19 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Side Quest Title Dedup:** Side quest generation/regeneration now filters duplicate optional quest titles, and the Quests screen hides legacy duplicate side rows so the active list never shows the same side quest multiple times.
 - [x] **Home Daily Forge Flow:** The `+` action beside Today's Dailies now opens the same custom-quest forge modal used in Quests and adds the forged quest directly into today's active daily flow instead of redirecting away from Home.
 - [x] **03:00 App-Day Streak Alignment:** Streaks, daily completions, reroll counts, and daily habit progress now all use the same `03:00 -> 03:00` app-day boundary instead of UTC day splits, so second-day streaks increment when the player clears the next app day.
+- [x] **03:00 App-Entry Streak Check-In:** Authenticated protected screens now wait for the per-user daily settlement/check-in pass before loading their content, so entering the app after `03:00` records that day's streak without needing an immediate quest completion.
+- [x] **Legacy Streak Recovery & Floor-Based Daily Rule:** Repaired users whose previous app-day entry was settled before streak check-ins were persisted, and aligned the 80% daily-clear rule to floor-based copy/logic (`3/4`, `4/5`, etc.) instead of rounding upward.
 - [x] **Recent Behavior-Aware Daily Generation:** Quest generation now uses the last 7 app days of completions, skipped quests with reasons, and recent generated daily titles to avoid stale repetition and build more intelligent daily pools.
+- [x] **AI Weekly Focus Inference:** If focus is left blank or set to system-choice mode, quest generation now lets the LLM choose a weekly focus, stores it on the profile, and uses it to make the active daily set less soft.
+- [x] **AI Weekly Focus Continuity:** Blank/system-chosen focus mode now carries the last AI weekly focus into later weekly generations by default, letting the system continue or sensibly evolve a long-term growth arc instead of resetting randomly every cycle.
+- [x] **Weekly Boss Unlock Gate:** Weekly boss quests now stay locked behind prerequisite daily/side progress, expose remaining unlock conditions in the quest UI, and reject completion server-side until the gate is satisfied.
 - [x] **Authenticated Daily Settlement Fallback:** Daily HP/streak settlement and pool rotation no longer rely only on a background cron; the app now performs an idempotent user-scoped daily settlement on authenticated entry/return after reset.
 - [x] **Reroll Feedback Memory:** Daily rerolls now require a structured reason (with optional custom detail), store that feedback per app day, and feed it back into later LLM generation so the system learns what the player is rejecting.
 - [x] **Persistent Bazaar Inventory:** Bazaar purchases now become inventory items instead of instant one-shot effects; static consumables and personalized offers can be bought, stacked, and used or redeemed later from an inventory section.
 - [x] **Habit Reward Economy:** Good habits now award gold as well as XP, and newly created custom habits derive reward values from frequency, polarity, and the player's current level instead of using flat generic rewards.
 - [x] **Character Stat Iconography:** The Character screen now decorates each stat lane with a dedicated icon and tuned accent color so the stat block reads more like an RPG attribute panel.
 - [x] **Hero HUD Copy Cleanup:** Removed the redundant economy helper line under the hero name so the top card stays tighter and less repetitive.
+- [x] **Daily Reroll Quota Cap:** Daily rerolls now cap at 2 per `03:00 -> 03:00` app day, replacing the overly generous raw-reserve count with a clearer player-facing quota.
 - [ ] Testing, QA, and bug fixing.
 - [ ] Final UI/UX polish (ensure it feels like an RPG HUD).
 

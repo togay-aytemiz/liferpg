@@ -135,6 +135,7 @@ export function validateQuestResponse(raw: string): {
     side_quests: QuestData[];
     boss_quest: QuestData;
     chain_quests: QuestData[];
+    weekly_focus: string | null;
 } {
     let parsed: Record<string, unknown>;
     try {
@@ -160,6 +161,9 @@ export function validateQuestResponse(raw: string): {
         side_quests: sideQuests.map(sanitizeQuest),
         boss_quest: sanitizeQuest(bossQuest as Record<string, unknown>),
         chain_quests: chainQuests.map(sanitizeQuest).slice(0, 3),
+        weekly_focus: typeof parsed.weekly_focus === "string"
+            ? parsed.weekly_focus.trim().substring(0, 160) || null
+            : null,
     };
 }
 

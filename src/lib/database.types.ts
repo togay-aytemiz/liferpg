@@ -20,6 +20,8 @@ export interface Profile {
     likes: string | null;
     dislikes: string | null;
     focus_areas: string | null;
+    ai_weekly_focus: string | null;
+    ai_weekly_focus_generated_at: string | null;
 
     // Core Attributes
     level: number;
@@ -62,6 +64,9 @@ export interface Quest {
     chain_id: string | null;
     chain_step: number | null;
     chain_total: number | null;
+    unlock_daily_required: number;
+    unlock_side_required: number;
+    unlock_rule_mode: 'any' | 'all';
     created_at: string;
     updated_at: string;
 }

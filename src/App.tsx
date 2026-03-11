@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './pages/Auth';
@@ -115,13 +115,18 @@ function AppRoutes() {
 
 function ProtectedNavLayout() {
   const { user, refreshProfile } = useAuth();
+  const [settlementReady, setSettlementReady] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setSettlementReady(true);
+      return;
+    }
 
     let cancelled = false;
+    setSettlementReady(false);
 
-    const runSettlement = async () => {
+    const runSettlement = async (options?: { initial?: boolean }) => {
       try {
         const result = await settleDailyIfNeeded();
         if (!cancelled && result.settled) {
@@ -129,10 +134,14 @@ function ProtectedNavLayout() {
         }
       } catch (error) {
         console.error('Daily settlement failed:', error);
+      } finally {
+        if (!cancelled && options?.initial) {
+          setSettlementReady(true);
+        }
       }
     };
 
-    void runSettlement();
+    void runSettlement({ initial: true });
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -145,7 +154,17 @@ function ProtectedNavLayout() {
       cancelled = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [user?.id]);
+  }, [refreshProfile, user?.id]);
+
+  if (!settlementReady) {
+    return (
+      <ProtectedRoute>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute>

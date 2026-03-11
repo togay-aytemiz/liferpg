@@ -16,6 +16,7 @@ import CustomQuestModal from '../components/CustomQuestModal';
 import RerollReasonModal from '../components/RerollReasonModal';
 import { APP_RUNTIME_CHANGED_EVENT, emitHabitCreated, HABIT_RUNTIME_CHANGED_EVENT } from '../lib/habitEvents';
 import { fetchQuestRuntime } from '../lib/questRuntime';
+import type { BossUnlockProgress } from '../lib/bossUnlock';
 import type { RerollReasonBucket } from '../lib/rerollReasons';
 
 export default function Quests() {
@@ -32,8 +33,11 @@ export default function Quests() {
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
     const [remainingRegenerations, setRemainingRegenerations] = useState(0);
     const [remainingDailyRerolls, setRemainingDailyRerolls] = useState(0);
+    const [dailyRerollQuotaRemaining, setDailyRerollQuotaRemaining] = useState(0);
+    const [dailyRerollReserveRemaining, setDailyRerollReserveRemaining] = useState(0);
     const [activeDailyHabitIds, setActiveDailyHabitIds] = useState<string[]>([]);
     const [loggedDailyHabitIds, setLoggedDailyHabitIds] = useState<string[]>([]);
+    const [bossUnlockStatusById, setBossUnlockStatusById] = useState<Record<string, BossUnlockProgress>>({});
 
     const [customModalOpen, setCustomModalOpen] = useState(false);
     const [rerollModalQuest, setRerollModalQuest] = useState<Quest | null>(null);
@@ -52,8 +56,11 @@ export default function Quests() {
         setCompletedBossIds(new Set(snapshot.completedBossIds));
         setRemainingRegenerations(snapshot.remainingRegenerations);
         setRemainingDailyRerolls(snapshot.remainingDailyRerolls);
+        setDailyRerollQuotaRemaining(snapshot.dailyRerollQuotaRemaining);
+        setDailyRerollReserveRemaining(snapshot.dailyRerollReserveRemaining);
         setActiveDailyHabitIds(snapshot.activeDailyHabitIds);
         setLoggedDailyHabitIds(snapshot.loggedDailyHabitIds);
+        setBossUnlockStatusById(snapshot.bossUnlockStatusById);
     }, [user]);
 
     useEffect(() => {
@@ -89,9 +96,9 @@ export default function Quests() {
             }
 
             await fetchQuests({ force: true });
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            showToast('Failed to complete quest', 'error');
+            showToast(err.message || 'Failed to complete quest', 'error');
         } finally {
             setLoadingId(null);
         }
@@ -271,6 +278,9 @@ export default function Quests() {
                         onMakeHabit={handleMakeHabit}
                         onRerollDaily={quest.quest_type === 'daily' ? handleOpenRerollDaily : undefined}
                         remainingDailyRerolls={quest.quest_type === 'daily' ? remainingDailyRerolls : null}
+                        dailyRerollQuotaRemaining={quest.quest_type === 'daily' ? dailyRerollQuotaRemaining : null}
+                        dailyRerollReserveRemaining={quest.quest_type === 'daily' ? dailyRerollReserveRemaining : null}
+                        bossUnlockProgress={quest.quest_type === 'boss' ? (bossUnlockStatusById[quest.id] ?? null) : null}
                         onRegenerate={quest.quest_type !== 'daily' ? handleOpenRegenerate : undefined}
                         remainingRegenerations={quest.quest_type !== 'daily' ? remainingRegenerations : null}
                         disableActions={!!loadingId || !!regeneratingId || !!rerollingId || !!habitActionId}
@@ -332,6 +342,8 @@ export default function Quests() {
                 open={!!rerollModalQuest}
                 quest={rerollModalQuest}
                 remainingAlternatives={remainingDailyRerolls}
+                quotaRemaining={dailyRerollQuotaRemaining}
+                reserveRemaining={dailyRerollReserveRemaining}
                 loading={!!rerollingId}
                 onClose={() => {
                     if (rerollingId) return;

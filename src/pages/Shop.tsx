@@ -17,6 +17,7 @@ import {
     STATIC_VIEW_CACHE_TTL_MS,
     writeCachedValue,
 } from '../lib/viewCache';
+import { normalizeInventoryStacks } from '../lib/inventoryStack';
 
 type StaticItemStyle = {
     icon: React.ReactNode;
@@ -79,7 +80,7 @@ export default function Shop() {
         }
 
         if (cachedInventory.hit) {
-            setInventoryItems(cachedInventory.value);
+            setInventoryItems(normalizeInventoryStacks(cachedInventory.value));
         }
 
         if (cachedOffers && cachedInventory.hit) {
@@ -108,7 +109,7 @@ export default function Shop() {
                 .select('*')
                 .eq('user_id', user!.id)
                 .eq('is_redeemed', false)
-                .order('created_at', { ascending: false }),
+                .order('updated_at', { ascending: false }),
         ]);
 
         if (items && items.length > 0) {
@@ -118,7 +119,7 @@ export default function Shop() {
             await handleGenerateShop();
         }
 
-        const nextInventory = (inventoryRows as InventoryItem[] | null) ?? [];
+        const nextInventory = normalizeInventoryStacks((inventoryRows as InventoryItem[] | null) ?? []);
         setInventoryItems(nextInventory);
         writeCachedValue(getInventoryCacheKey(user!.id), nextInventory, STATIC_VIEW_CACHE_TTL_MS);
 
@@ -149,10 +150,10 @@ export default function Shop() {
     const upsertInventoryItem = (inventoryItem?: InventoryItem | null) => {
         if (!inventoryItem) return;
         setInventoryItems((prev) => {
-            const nextItems = [
+            const nextItems = normalizeInventoryStacks([
                 inventoryItem,
                 ...prev.filter((existingItem) => existingItem.id !== inventoryItem.id),
-            ];
+            ]);
             if (user) {
                 writeCachedValue(getInventoryCacheKey(user.id), nextItems, STATIC_VIEW_CACHE_TTL_MS);
             }
@@ -244,7 +245,7 @@ export default function Shop() {
                 upsertInventoryItem(res.inventory_item);
             } else {
                 setInventoryItems((prev) => {
-                    const nextItems = prev.filter((inventoryEntry) => inventoryEntry.id !== item.id);
+                    const nextItems = normalizeInventoryStacks(prev.filter((inventoryEntry) => inventoryEntry.id !== item.id));
                     if (user) {
                         writeCachedValue(getInventoryCacheKey(user.id), nextItems, STATIC_VIEW_CACHE_TTL_MS);
                     }
@@ -297,60 +298,67 @@ export default function Shop() {
             <div className="flex-1 overflow-y-auto p-4 pt-5 pb-[calc(8rem+env(safe-area-inset-bottom))] space-y-8">
 
                 <section className="space-y-4">
-                    <div className="flex items-center justify-between px-2">
-                        <h2 className="font-heading text-lg text-white flex items-center gap-2">
+                    <div className="px-2">
+                        <div className="flex items-center gap-2">
                             <Package className="w-5 h-5 text-amber-400" />
-                            Inventory
-                        </h2>
-                        <span className="text-xs text-slate-500">
+                            <h2 className="font-heading text-lg text-white">
+                                Inventory
+                            </h2>
+                        </div>
+                        <p className="mt-1 pl-7 text-xs text-slate-500">
                             Bought items stay here until you use or redeem them.
-                        </span>
+                        </p>
                     </div>
 
                     {inventoryItems.length > 0 ? (
-                        <div className="grid grid-cols-1 gap-4">
+                        <div className="grid grid-cols-1 gap-3">
                             {inventoryItems.map((item) => {
                                 const style = getInventoryVisual(item);
                                 const isUsing = usingInventoryId === item.id;
                                 const quantityLabel = item.quantity > 1 ? `x${item.quantity}` : null;
 
                                 return (
-                                    <div key={item.id} className={`bg-gradient-to-br to-slate-900 ${style.color} border rounded-xl p-4 flex flex-col gap-3 transition-all duration-300 relative overflow-hidden group`}>
-                                        <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-white/10 transition-colors" />
+                                    <div key={item.id} className={`bg-gradient-to-br to-slate-900 ${style.color} border rounded-xl p-3 flex gap-3 items-start transition-all duration-300 relative overflow-hidden group`}>
+                                        <div className="absolute -top-10 -right-10 h-28 w-28 rounded-full bg-white/5 blur-2xl transition-colors group-hover:bg-white/10" />
 
-                                        <div className="flex gap-4 relative z-10">
-                                            <div className="w-14 h-14 rounded-lg bg-slate-950/50 border border-white/10 flex items-center justify-center shrink-0 shadow-inner">
+                                        <div className="relative z-10 w-12 h-12 rounded-lg bg-slate-950/50 border border-white/10 flex items-center justify-center shrink-0 shadow-inner">
+                                            <div className="scale-90">
                                                 {style.icon}
                                             </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="mb-1 flex items-start justify-between gap-2">
-                                                    <h3 className="line-clamp-2 pr-1 font-heading text-lg leading-tight text-white">{item.title}</h3>
-                                                    <div className="flex items-center gap-2 shrink-0">
+                                        </div>
+
+                                        <div className="relative z-10 flex min-w-0 flex-1 items-start gap-3">
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="min-w-0">
+                                                        <h3 className="line-clamp-2 pr-1 font-heading text-base leading-tight text-white">{item.title}</h3>
+                                                        <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-slate-400">{item.description}</p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 shrink-0">
                                                         {quantityLabel && (
-                                                            <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-300">
+                                                            <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-amber-300">
                                                                 {quantityLabel}
                                                             </span>
                                                         )}
-                                                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-700">
+                                                        <span className="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-500">
                                                             {item.source_type === 'dynamic' ? 'Reward' : 'Item'}
                                                         </span>
                                                     </div>
                                                 </div>
-                                                <p className="line-clamp-3 text-sm leading-snug text-slate-400">{item.description}</p>
-                                            </div>
-                                        </div>
 
-                                        <div className="flex items-center justify-between pt-2 border-t border-white/5 relative z-10">
-                                            <div className="text-[11px] text-slate-500">
-                                                {item.source_type === 'dynamic' ? 'Bought from the Bazaar and stored for later.' : 'Stored safely until you choose to use it.'}
+                                                <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/5 pt-2">
+                                                    <p className="line-clamp-1 text-[11px] text-slate-500">
+                                                        {item.source_type === 'dynamic' ? 'Stored from the Bazaar for later redemption.' : 'Stored until you choose to use it.'}
+                                                    </p>
+                                                    <button
+                                                        onClick={() => void handleUseInventoryItem(item)}
+                                                        disabled={isUsing}
+                                                        className="shrink-0 rounded-lg bg-amber-500 px-3.5 py-2 text-[11px] font-heading uppercase tracking-wide text-slate-900 transition-colors shadow-glow-gold hover:bg-amber-400 disabled:bg-slate-700 disabled:text-slate-500 disabled:shadow-none"
+                                                    >
+                                                        {isUsing ? <div className="w-3.5 h-3.5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" /> : getInventoryActionLabel(item)}
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <button
-                                                onClick={() => void handleUseInventoryItem(item)}
-                                                disabled={isUsing}
-                                                className="px-5 py-2 rounded-lg font-heading uppercase tracking-wide text-xs transition-colors flex items-center justify-center min-w-[110px] bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-glow-gold disabled:bg-slate-700 disabled:text-slate-500 disabled:shadow-none"
-                                            >
-                                                {isUsing ? <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" /> : getInventoryActionLabel(item)}
-                                            </button>
                                         </div>
                                     </div>
                                 );
@@ -446,7 +454,10 @@ export default function Shop() {
                 {/* STATIC MAGICAL GOODS */}
                 <section className="space-y-4">
                     <div className="flex items-center justify-between px-2">
-                        <h2 className="font-heading text-lg text-slate-400">Magical Goods</h2>
+                        <h2 className="font-heading text-lg text-white flex items-center gap-2">
+                            <Star className="w-5 h-5 text-amber-400" />
+                            Magical Goods
+                        </h2>
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 opacity-90">

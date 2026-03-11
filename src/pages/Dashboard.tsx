@@ -9,13 +9,14 @@ import {
     getVisibleDailyQuests,
     xpRequiredForLevel,
 } from '../lib/gameplay';
-import { getDashboardStreakCacheKey, readCachedValue, VIEW_CACHE_TTL_MS, writeCachedValue } from '../lib/viewCache';
+import { getDashboardStreakCacheKey, readCachedOrLoadValue, VIEW_CACHE_TTL_MS, writeCachedValue } from '../lib/viewCache';
 import { Flame, Coins, Sparkles, Heart, Plus } from 'lucide-react';
 import DailyProgressCard from '../components/DailyProgressCard';
 import Habits from '../components/Habits';
 import QuestCard from '../components/QuestCard';
 import CustomQuestModal from '../components/CustomQuestModal';
 import RerollReasonModal from '../components/RerollReasonModal';
+import PixelResourceBar from '../components/PixelResourceBar';
 import { APP_RUNTIME_CHANGED_EVENT, emitHabitCreated, HABIT_RUNTIME_CHANGED_EVENT } from '../lib/habitEvents';
 import type { RerollReasonBucket } from '../lib/rerollReasons';
 
@@ -31,6 +32,8 @@ export default function Dashboard() {
     const [actionId, setActionId] = useState<string | null>(null);
     const [rerollingId, setRerollingId] = useState<string | null>(null);
     const [remainingDailyRerolls, setRemainingDailyRerolls] = useState(0);
+    const [dailyRerollQuotaRemaining, setDailyRerollQuotaRemaining] = useState(0);
+    const [dailyRerollReserveRemaining, setDailyRerollReserveRemaining] = useState(0);
     const [activeDailyHabitIds, setActiveDailyHabitIds] = useState<string[]>([]);
     const [loggedDailyHabitIds, setLoggedDailyHabitIds] = useState<string[]>([]);
     const [customModalOpen, setCustomModalOpen] = useState(false);
@@ -43,27 +46,27 @@ export default function Dashboard() {
         setQuests(questRuntime.quests);
         setCompletedQuestIds(new Set(questRuntime.completedQuestIds));
         setRemainingDailyRerolls(questRuntime.remainingDailyRerolls);
+        setDailyRerollQuotaRemaining(questRuntime.dailyRerollQuotaRemaining);
+        setDailyRerollReserveRemaining(questRuntime.dailyRerollReserveRemaining);
         setActiveDailyHabitIds(questRuntime.activeDailyHabitIds);
         setLoggedDailyHabitIds(questRuntime.loggedDailyHabitIds);
 
         const streakCacheKey = getDashboardStreakCacheKey(user.id);
-        if (!options?.force) {
-            const cachedStreak = readCachedValue<Streak | null>(streakCacheKey);
-            if (cachedStreak.hit) {
-                setStreak(cachedStreak.value);
-                return;
-            }
-        }
+        const loadStreak = async () => {
+            const { data: streakData } = await supabase
+                .from('streaks')
+                .select('*')
+                .eq('user_id', user.id)
+                .single();
 
-        const { data: streakData } = await supabase
-            .from('streaks')
-            .select('*')
-            .eq('user_id', user.id)
-            .single();
+            return (streakData as Streak | null) ?? null;
+        };
 
-        const nextStreak = (streakData as Streak | null) ?? null;
+        const nextStreak = options?.force
+            ? writeCachedValue(streakCacheKey, await loadStreak(), VIEW_CACHE_TTL_MS)
+            : await readCachedOrLoadValue(streakCacheKey, loadStreak, VIEW_CACHE_TTL_MS);
+
         setStreak(nextStreak);
-        writeCachedValue(streakCacheKey, nextStreak, VIEW_CACHE_TTL_MS);
     }, [user]);
 
     useEffect(() => {
@@ -114,9 +117,9 @@ export default function Dashboard() {
             }
 
             await fetchData({ force: true });
-        } catch (err) {
+        } catch (err: any) {
             console.error('Quest completion failed:', err);
-            setActionToast({ msg: 'Failed to complete quest', type: 'error' });
+            setActionToast({ msg: err.message || 'Failed to complete quest', type: 'error' });
             setTimeout(() => setActionToast(null), 3000);
         } finally {
             setLoadingId(null);
@@ -248,30 +251,24 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    <div className="space-y-1 mt-4">
-                        <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">XP</span>
-                            <span className="text-amber-500 font-mono">{currentXP} / {nextLevelXP}</span>
-                        </div>
-                        <div className="w-full h-3 bg-slate-900 rounded-full overflow-hidden shadow-inner-panel">
-                            <div
-                                className="h-full bg-amber-500 rounded-full transition-all duration-700 shadow-glow-gold"
-                                style={{ width: `${xpPercent}%` }}
-                            />
-                        </div>
-                    </div>
+                    <div className="mt-4 space-y-3">
+                        <PixelResourceBar
+                            label="XP"
+                            icon={<Sparkles className="h-4 w-4" />}
+                            current={currentXP}
+                            max={nextLevelXP}
+                            percent={xpPercent}
+                            tone="xp"
+                        />
 
-                    <div className="space-y-1 mt-3">
-                        <div className="flex justify-between text-xs">
-                            <span className="text-slate-400 flex items-center gap-1"><Heart className="w-3 h-3 text-red-500" fill="currentColor" /> HP</span>
-                            <span className="text-red-500 font-mono">{profile?.hp ?? 100} / {profile?.max_hp ?? 100}</span>
-                        </div>
-                        <div className="w-full h-3 bg-slate-900 rounded-full overflow-hidden shadow-inner-panel">
-                            <div
-                                className="h-full bg-red-500 rounded-full transition-all duration-700"
-                                style={{ width: `${Math.min(((profile?.hp ?? 100) / Math.max(profile?.max_hp ?? 100, 1)) * 100, 100)}%`, boxShadow: '0 0 10px rgba(239,68,68,0.5)' }}
-                            />
-                        </div>
+                        <PixelResourceBar
+                            label="HP"
+                            icon={<Heart className="h-4 w-4" fill="currentColor" />}
+                            current={profile?.hp ?? 100}
+                            max={profile?.max_hp ?? 100}
+                            percent={Math.min(((profile?.hp ?? 100) / Math.max(profile?.max_hp ?? 100, 1)) * 100, 100)}
+                            tone="hp"
+                        />
                     </div>
                 </div>
 
@@ -307,6 +304,8 @@ export default function Dashboard() {
                                     onMakeHabit={handleMakeHabit}
                                     onRerollDaily={handleOpenRerollDaily}
                                     remainingDailyRerolls={remainingDailyRerolls}
+                                    dailyRerollQuotaRemaining={dailyRerollQuotaRemaining}
+                                    dailyRerollReserveRemaining={dailyRerollReserveRemaining}
                                     disableActions={!!loadingId || !!actionId || !!rerollingId}
                                 />
                             ))}
@@ -346,6 +345,8 @@ export default function Dashboard() {
                 open={!!rerollModalQuest}
                 quest={rerollModalQuest}
                 remainingAlternatives={remainingDailyRerolls}
+                quotaRemaining={dailyRerollQuotaRemaining}
+                reserveRemaining={dailyRerollReserveRemaining}
                 loading={!!rerollingId}
                 onClose={() => {
                     if (rerollingId) return;

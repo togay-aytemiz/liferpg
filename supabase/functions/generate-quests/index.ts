@@ -16,6 +16,8 @@ import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 import { buildRecentQuestBehaviorContext } from "../_shared/recentQuestBehavior.ts";
 import { dedupeDailyPool, dedupeQuestPoolByTitle, getLatestQuestBatch } from "../../../src/lib/dailyPool.ts";
 import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
+import { getBossUnlockConfig } from "../../../src/lib/bossUnlock.ts";
+import { buildAutoFocusPromptContext, isAutoFocusMode, rebalanceAutoFocusDailyPool, sanitizeWeeklyFocus } from "../_shared/autoFocus.ts";
 
 const MIN_GENERATED_BATCH_SIZE = 7;
 const PROFILE_SYNC_GRACE_MS = 2_000;
@@ -35,6 +37,7 @@ Your job is to analyze a user's daily routine description and generate personali
 
 You MUST return valid JSON with this exact structure:
 {
+  "weekly_focus": "Short weekly focus summary chosen by the AI, or null if the user already gave a clear focus",
   "daily_quests": [
     {
       "title": "Quest title (short, action-oriented)",
@@ -108,7 +111,9 @@ Rules:
 - XP rewards should match difficulty
 - Keep the tone motivating and RPG-themed
 - IMPORTANT CONTEXT AVOIDANCE: If the user provides 'active_habits', DO NOT generate Daily or Side quests that perfectly match these existing habits. Generate complementary or entirely new quests instead.
-- IMPORTANT RECENT MEMORY: If the prompt includes recent app-day behavior, treat it as a hard anti-repetition signal. Avoid recently skipped/disliked patterns, and avoid reusing the same daily titles from the recent generated history unless there is no stronger alternative.`;
+- IMPORTANT RECENT MEMORY: If the prompt includes recent app-day behavior, treat it as a hard anti-repetition signal. Avoid recently skipped/disliked patterns, and avoid reusing the same daily titles from the recent generated history unless there is no stronger alternative.
+- IMPORTANT AUTO-FOCUS MODE: If the prompt says the system should choose focus, you must return "weekly_focus" and use it to shape a stronger weekly arc. In that mode, the active daily set must not feel like all-soft maintenance chores when the routine allows harder pushes.
+- IMPORTANT WEEKLY FOCUS CONTINUITY: If the prompt includes an existing AI weekly focus, prefer continuing that long-term theme. Only replace it when the user's recent behavior, dislikes, or routine make the old direction a poor fit.`;
 
 serve(async (req) => {
     // Handle CORS preflight
@@ -151,7 +156,7 @@ serve(async (req) => {
         // batch still matches the user's current onboarding state.
         const { data: profile } = await supabase
             .from("profiles")
-            .select("likes, dislikes, focus_areas, updated_at")
+            .select("likes, dislikes, focus_areas, ai_weekly_focus, ai_weekly_focus_generated_at, updated_at, level, stat_strength, stat_knowledge, stat_wealth, stat_adventure, stat_social")
             .eq("id", user.id)
             .single();
 
@@ -207,6 +212,8 @@ serve(async (req) => {
         const likesText = profile?.likes ? `\nWhat I LIKE/ENJOY: ${profile.likes}` : "";
         const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
         const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
+        const autoFocusMode = isAutoFocusMode(profile?.focus_areas);
+        const autoFocusContext = buildAutoFocusPromptContext(profile ?? {});
         const habitsFromRequest = Array.isArray(active_habits) ? active_habits.slice(0, 20) : [];
 
         const { data: activeHabitsFromDb } = habitsFromRequest.length === 0
@@ -237,7 +244,7 @@ serve(async (req) => {
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${habitsContext}${recentBehaviorContext}\n\nPlease generate quests highly tailored to this routine, my focus areas, my likes, and my recent real behavior. Strictly AVOID what I hate, what I recently skipped, and stale repetitions of the same daily titles. Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).` },
+                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${habitsContext}${recentBehaviorContext}${autoFocusContext}\n\nPlease generate quests highly tailored to this routine, my focus areas, my likes, and my recent real behavior. Strictly AVOID what I hate, what I recently skipped, and stale repetitions of the same daily titles. Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength). If auto-focus mode is active, choose one strong weekly focus, return it in weekly_focus, and let it drive the boss quest plus the visible dailies without making the whole week feel too soft. If a previous AI weekly focus exists and still fits, continue it instead of resetting to a random new theme.` },
             ],
             {
                 model: "gpt-4o-mini",
@@ -249,9 +256,18 @@ serve(async (req) => {
 
         // Parse and VALIDATE the AI-generated quests (whitelists fields)
         const generatedQuests = validateQuestResponse(aiResponse);
-        const dailyQuestPool = dedupeDailyPool(generatedQuests.daily_quests).slice(0, DAILY_POOL_LIMIT);
-        const activeDailyCount = getActiveDailyLimit(dailyQuestPool.length);
+        const rawDailyQuestPool = dedupeDailyPool(generatedQuests.daily_quests).slice(0, DAILY_POOL_LIMIT);
+        const activeDailyCount = getActiveDailyLimit(rawDailyQuestPool.length);
+        const dailyQuestPool = autoFocusMode
+            ? rebalanceAutoFocusDailyPool(rawDailyQuestPool, activeDailyCount)
+            : rawDailyQuestPool;
         const sideQuests = dedupeQuestPoolByTitle(generatedQuests.side_quests).slice(0, SIDE_QUEST_LIMIT);
+        const weeklyFocus = autoFocusMode ? sanitizeWeeklyFocus(generatedQuests.weekly_focus) : null;
+        const bossUnlockConfig = getBossUnlockConfig({
+            difficulty: generatedQuests.boss_quest.difficulty as "easy" | "medium" | "hard" | "epic",
+            activeDailyCount,
+            sideQuestCount: sideQuests.length,
+        });
 
         // Generate a chain_id for boss + chain quests
         const chainId = crypto.randomUUID();
@@ -302,6 +318,9 @@ serve(async (req) => {
                 chain_id: chainTotal > 1 ? chainId : null,
                 chain_step: chainTotal > 1 ? 1 : null,
                 chain_total: chainTotal > 1 ? chainTotal : null,
+                unlock_daily_required: bossUnlockConfig.unlock_daily_required,
+                unlock_side_required: bossUnlockConfig.unlock_side_required,
+                unlock_rule_mode: bossUnlockConfig.unlock_rule_mode,
             },
             // Chain follow-up quests (step 2, 3, ... — start LOCKED)
             ...chainQuests.map((q, i: number) => ({
@@ -319,6 +338,9 @@ serve(async (req) => {
                 chain_id: chainId,
                 chain_step: i + 2,
                 chain_total: chainTotal,
+                unlock_daily_required: 0,
+                unlock_side_required: 0,
+                unlock_rule_mode: "all",
             })),
         ];
 
@@ -334,6 +356,18 @@ serve(async (req) => {
                 JSON.stringify({ error: "Failed to save quests", details: insertError.message }),
                 { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
+        }
+
+        const { error: profileUpdateError } = await supabase
+            .from("profiles")
+            .update({
+                ai_weekly_focus: weeklyFocus,
+                ai_weekly_focus_generated_at: weeklyFocus ? new Date().toISOString() : null,
+            })
+            .eq("id", user.id);
+
+        if (profileUpdateError) {
+            console.warn("Failed to persist AI weekly focus:", profileUpdateError.message);
         }
 
         // Also initialize streak record for this user if not exists
@@ -353,6 +387,7 @@ serve(async (req) => {
                     boss: 1,
                     chain: chainQuests.length,
                 },
+                weekly_focus: weeklyFocus,
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );

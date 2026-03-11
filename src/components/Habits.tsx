@@ -5,17 +5,14 @@ import { logHabit } from '../lib/api';
 import type { Habit } from '../lib/database.types';
 import HabitCard from './HabitCard';
 import { emitHabitRuntimeChanged, HABIT_CREATED_EVENT } from '../lib/habitEvents';
-import {
-    getHabitsCacheKey,
-    getHabitsTodayLogCacheKey,
-    readCachedValue,
-    VIEW_CACHE_TTL_MS,
-    writeCachedValue,
-} from '../lib/viewCache';
 import { Plus, Activity } from 'lucide-react';
-import { getCurrentAppDayWindow } from '../lib/appDay';
 import { invalidateQuestRuntime } from '../lib/questRuntime';
 import { getSuggestedHabitRewards } from '../lib/habitGameplay';
+import {
+    fetchHabitSnapshot,
+    readCachedHabitSnapshot,
+    writeCachedHabitSnapshot,
+} from '../lib/habitSnapshot';
 
 export default function Habits() {
     const { user, profile } = useAuth();
@@ -35,26 +32,31 @@ export default function Habits() {
     const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly'>('daily');
     const [submitting, setSubmitting] = useState(false);
 
+    const persistHabitSnapshot = (nextHabits: Habit[], nextLoggedTodayIds: Iterable<string>) => {
+        if (!user) return;
+
+        const loggedToday = [...new Set(Array.from(nextLoggedTodayIds))];
+        writeCachedHabitSnapshot(user.id, {
+            habits: nextHabits,
+            loggedTodayIds: loggedToday,
+            activeDailyHabitIds: nextHabits
+                .filter((habit) => habit.is_good && habit.frequency === 'daily')
+                .map((habit) => habit.id),
+        });
+    };
+
     useEffect(() => {
         if (!user) return;
-        const habitCacheKey = getHabitsCacheKey(user.id);
-        const logCacheKey = getHabitsTodayLogCacheKey(user.id);
-        const cachedHabits = readCachedValue<Habit[]>(habitCacheKey);
-        const cachedLogs = readCachedValue<string[]>(logCacheKey);
+        const cachedSnapshot = readCachedHabitSnapshot(user.id);
 
-        if (cachedHabits.hit) {
-            setHabits(cachedHabits.value);
-        }
-
-        if (cachedLogs.hit) {
-            setLoggedTodayIds(new Set(cachedLogs.value));
-        }
-
-        if (cachedHabits.hit && cachedLogs.hit) {
+        if (cachedSnapshot.hit) {
+            setHabits(cachedSnapshot.value.habits);
+            setLoggedTodayIds(new Set(cachedSnapshot.value.loggedTodayIds));
             setLoading(false);
-        } else {
-            fetchHabits();
+            return;
         }
+
+        void fetchHabits();
     }, [user]);
 
     useEffect(() => {
@@ -71,7 +73,7 @@ export default function Habits() {
                     nextHabits = [newHabit, ...prev];
                 }
 
-                writeCachedValue(getHabitsCacheKey(user.id), nextHabits, VIEW_CACHE_TTL_MS);
+                persistHabitSnapshot(nextHabits, loggedTodayIds);
                 return nextHabits;
             });
             setLoading(false);
@@ -79,35 +81,14 @@ export default function Habits() {
 
         window.addEventListener(HABIT_CREATED_EVENT, handleHabitCreated as EventListener);
         return () => window.removeEventListener(HABIT_CREATED_EVENT, handleHabitCreated as EventListener);
-    }, [user]);
+    }, [loggedTodayIds, user]);
 
-    const fetchHabits = async () => {
-        const todayWindow = getCurrentAppDayWindow();
+    const fetchHabits = async (options?: { force?: boolean }) => {
+        if (!user) return;
 
-        const [{ data: habitRows }, { data: logRows }] = await Promise.all([
-            supabase
-                .from('habits')
-                .select('*')
-                .eq('user_id', user!.id)
-                .eq('is_active', true)
-                .order('created_at', { ascending: false }),
-            supabase
-                .from('habit_logs')
-                .select('habit_id')
-                .eq('user_id', user!.id)
-                .gte('created_at', todayWindow.startIso)
-                .lt('created_at', todayWindow.endIso),
-        ]);
-
-        if (habitRows) {
-            const nextHabits = habitRows as Habit[];
-            setHabits(nextHabits);
-            writeCachedValue(getHabitsCacheKey(user!.id), nextHabits, VIEW_CACHE_TTL_MS);
-        }
-
-        const nextLoggedTodayIds = [...new Set((logRows ?? []).map((row: { habit_id: string }) => row.habit_id))];
-        setLoggedTodayIds(new Set(nextLoggedTodayIds));
-        writeCachedValue(getHabitsTodayLogCacheKey(user!.id), nextLoggedTodayIds, VIEW_CACHE_TTL_MS);
+        const snapshot = await fetchHabitSnapshot(user.id, options);
+        setHabits(snapshot.habits);
+        setLoggedTodayIds(new Set(snapshot.loggedTodayIds));
         setLoading(false);
     };
 
@@ -139,7 +120,7 @@ export default function Habits() {
         } else if (data) {
             const nextHabits = [data as Habit, ...habits];
             setHabits(nextHabits);
-            writeCachedValue(getHabitsCacheKey(user.id), nextHabits, VIEW_CACHE_TTL_MS);
+            persistHabitSnapshot(nextHabits, loggedTodayIds);
             invalidateQuestRuntime(user.id);
             emitHabitRuntimeChanged();
             setShowModal(false);
@@ -157,9 +138,7 @@ export default function Habits() {
             if (result.success) {
                 const nextLoggedTodayIds = [...loggedTodayIds, habit.id];
                 setLoggedTodayIds(new Set(nextLoggedTodayIds));
-                if (user) {
-                    writeCachedValue(getHabitsTodayLogCacheKey(user.id), [...new Set(nextLoggedTodayIds)], VIEW_CACHE_TTL_MS);
-                }
+                persistHabitSnapshot(habits, nextLoggedTodayIds);
 
                 if (result.died) {
                     showToast("You died from a bad habit! HP restored, but you lost half your gold and your streak was reset.", "error");
@@ -191,21 +170,14 @@ export default function Habits() {
             return;
         }
 
-        setHabits(prev => {
-            const nextHabits = prev.filter(h => h.id !== deleteTarget.id);
-            if (user) {
-                writeCachedValue(getHabitsCacheKey(user.id), nextHabits, VIEW_CACHE_TTL_MS);
-            }
-            return nextHabits;
-        });
-        setLoggedTodayIds((prev) => {
-            const next = new Set(prev);
-            next.delete(deleteTarget.id);
-            if (user) {
-                writeCachedValue(getHabitsTodayLogCacheKey(user.id), [...next], VIEW_CACHE_TTL_MS);
-            }
-            return next;
-        });
+        const nextHabits = habits.filter((habit) => habit.id !== deleteTarget.id);
+        const nextLoggedTodayIds = new Set(loggedTodayIds);
+        nextLoggedTodayIds.delete(deleteTarget.id);
+
+        setHabits(nextHabits);
+        setLoggedTodayIds(nextLoggedTodayIds);
+        persistHabitSnapshot(nextHabits, nextLoggedTodayIds);
+
         if (user) {
             invalidateQuestRuntime(user.id);
             emitHabitRuntimeChanged();

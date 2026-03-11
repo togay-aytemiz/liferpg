@@ -22,6 +22,7 @@ import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
 import { buildRerollReasonPrompt } from "../../../src/lib/rerollReasons.ts";
 
 const MAX_DAILY_SKIPS = 3;
+const MAX_DAILY_REROLLS = 2;
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
 const VALID_STATS = new Set(["strength", "knowledge", "wealth", "adventure", "social"]);
 const VALID_REROLL_BUCKETS = new Set(["wrong_time", "too_easy", "too_hard", "not_interested", "not_relevant", "energy_mismatch", "custom"]);
@@ -102,6 +103,19 @@ serve(async (req) => {
             }
 
             const rerollReason = buildRerollReasonPrompt(reason_bucket, safeReasonDetail);
+            const { count: todayRerolls } = await supabase
+                .from("quest_feedback")
+                .select("*", { count: "exact", head: true })
+                .eq("user_id", user.id)
+                .eq("feedback_type", "reroll")
+                .eq("app_day_key", today);
+
+            if ((todayRerolls ?? 0) >= MAX_DAILY_REROLLS) {
+                return new Response(
+                    JSON.stringify({ error: `You can only reroll ${MAX_DAILY_REROLLS} daily quests per day.` }),
+                    { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
 
             const { data: allDailyPoolRows, error: dailyPoolError } = await supabase
                 .from("quests")

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Coins, MoreHorizontal, RefreshCw } from 'lucide-react';
+import { Check, Coins, Lock, MoreHorizontal, RefreshCw } from 'lucide-react';
 import type { Quest } from '../lib/database.types';
 import { getQuestGoldReward } from '../lib/questEconomy';
+import type { BossUnlockProgress } from '../lib/bossUnlock';
+import { formatBossUnlockRemaining, formatBossUnlockRequirement } from '../lib/bossUnlock';
+import { getStatPresentation } from '../lib/statPresentation';
 
 type QuestCardProps = {
     quest: Quest;
@@ -14,6 +17,9 @@ type QuestCardProps = {
     onRegenerate?: (quest: Quest) => void;
     remainingRegenerations?: number | null;
     remainingDailyRerolls?: number | null;
+    dailyRerollQuotaRemaining?: number | null;
+    dailyRerollReserveRemaining?: number | null;
+    bossUnlockProgress?: BossUnlockProgress | null;
     disableActions?: boolean;
 };
 
@@ -28,6 +34,9 @@ export default function QuestCard({
     onRegenerate,
     remainingRegenerations,
     remainingDailyRerolls,
+    dailyRerollQuotaRemaining,
+    dailyRerollReserveRemaining,
+    bossUnlockProgress = null,
     disableActions = false,
 }: QuestCardProps) {
     const [menuOpen, setMenuOpen] = useState(false);
@@ -59,22 +68,37 @@ export default function QuestCard({
     const hasMenuActions = canMakeHabit || canRerollDaily || canRegenerate;
     const regenerateDisabled = typeof remainingRegenerations === 'number' && remainingRegenerations <= 0;
     const rerollDisabled = typeof remainingDailyRerolls === 'number' && remainingDailyRerolls <= 0;
+    const rerollStatusText = typeof remainingDailyRerolls === 'number'
+        ? remainingDailyRerolls > 0
+            ? `${remainingDailyRerolls} reroll${remainingDailyRerolls === 1 ? '' : 's'} left today`
+            : (dailyRerollQuotaRemaining ?? 0) <= 0
+                ? 'No rerolls left today'
+                : (dailyRerollReserveRemaining ?? 0) <= 0
+                    ? 'No alternate dailies left in the current reserve'
+                    : 'No rerolls available right now'
+        : 'Checking reroll availability...';
     const goldReward = getQuestGoldReward(quest.quest_type, quest.difficulty, quest.gold_reward);
+    const isBossLocked = quest.quest_type === 'boss' && bossUnlockProgress !== null && !bossUnlockProgress.unlocked;
+    const statPresentation = getStatPresentation(quest.stat_affected);
 
     return (
         <div
             className={`relative bg-slate-800 border rounded-lg p-4 flex items-start gap-3 shadow-hud transition-all duration-300 ${isCompleted
                 ? 'border-emerald-800/50 opacity-60'
                 : quest.quest_type === 'boss'
-                    ? 'border-red-900/60'
+                    ? isBossLocked
+                        ? 'border-amber-900/60'
+                        : 'border-red-900/60'
                     : 'border-slate-700'
                 }`}
         >
             <button
                 onClick={() => onComplete(quest)}
-                disabled={isCompleted || isCompleting || disableActions}
+                disabled={isCompleted || isCompleting || disableActions || isBossLocked}
                 className={`w-6 h-6 rounded mt-0.5 border-2 flex items-center justify-center transition-all shrink-0 ${isCompleted
                     ? 'bg-emerald-500 border-emerald-500'
+                    : isBossLocked
+                        ? 'bg-amber-950/40 border-amber-700'
                     : 'bg-slate-900 border-slate-600 hover:border-amber-500'
                     }`}
             >
@@ -82,12 +106,22 @@ export default function QuestCard({
                     <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
                 ) : isCompleted ? (
                     <Check className="w-4 h-4 text-white" />
+                ) : isBossLocked ? (
+                    <Lock className="w-3.5 h-3.5 text-amber-300" />
                 ) : null}
             </button>
 
             <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
+                        {statPresentation && (
+                            <div className="mb-1 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                                <span className={`${statPresentation.iconClass} opacity-70`}>
+                                    {statPresentation.icon}
+                                </span>
+                                <span className="text-slate-400">{statPresentation.label}</span>
+                            </div>
+                        )}
                         <p className={`line-clamp-2 pr-2 font-medium text-sm leading-snug ${isCompleted ? 'line-through text-slate-500' : 'text-white'}`}>
                             {quest.title}
                         </p>
@@ -103,6 +137,14 @@ export default function QuestCard({
                     <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{quest.description}</p>
                 )}
 
+                {isBossLocked && bossUnlockProgress && (
+                    <div className="mt-1.5 space-y-1 rounded-lg border border-amber-900/40 bg-amber-950/10 px-2.5 py-2">
+                        <p className="text-[11px] font-heading tracking-wide text-amber-300">Locked Weekly Boss</p>
+                        <p className="text-[11px] text-slate-400">{formatBossUnlockRequirement(bossUnlockProgress)}</p>
+                        <p className="text-[11px] text-amber-200">{formatBossUnlockRemaining(bossUnlockProgress)}</p>
+                    </div>
+                )}
+
                 <div className="mt-1.5 flex items-center gap-3 flex-wrap">
                     <span className="text-amber-500 text-xs font-mono">+{quest.xp_reward} XP</span>
                     <span className="inline-flex items-center gap-1 text-xs font-mono text-yellow-300">
@@ -112,9 +154,6 @@ export default function QuestCard({
                     <span className={`text-xs ${difficultyColors[quest.difficulty] || 'text-slate-400'}`}>
                         {quest.difficulty}
                     </span>
-                    {quest.stat_affected && (
-                        <span className="text-xs text-slate-500 capitalize">{quest.stat_affected}</span>
-                    )}
                 </div>
             </div>
 
@@ -158,13 +197,9 @@ export default function QuestCard({
                                         {isActionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" /> : null}
                                         Reroll Daily
                                     </span>
-                                    <span className="text-[11px] text-slate-500">Swap this slot with another daily from the current pool.</span>
+                                    <span className="text-[11px] text-slate-500">2 rerolls per day. Swap this slot with another daily from the current pool.</span>
                                     <span className="mt-1 text-[11px] text-slate-500">
-                                        {typeof remainingDailyRerolls === 'number'
-                                            ? remainingDailyRerolls > 0
-                                                ? `${remainingDailyRerolls} alternate ${remainingDailyRerolls === 1 ? 'daily' : 'dailies'} available`
-                                                : `No alternate dailies left in the current reserve`
-                                            : 'Checking alternate dailies...'}
+                                        {rerollStatusText}
                                     </span>
                                 </button>
                             )}

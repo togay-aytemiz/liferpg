@@ -83,18 +83,27 @@ Tasks are converted into quests.
 - AI should generate a **small rotating pool**, not a wall of chores.
 - Only **3-5 daily quests** should be active/visible at a time; the rest of the current pool can rotate in on later days without requiring a fresh LLM call every day.
 - Daily quests should support **rerolling** into another option from the current hidden pool instead of using a punitive "skip" action.
-- The daily quest action menu should show how many rerolls remain in the **current daily pool**; if there are no alternates left, the menu should say so explicitly instead of implying a hidden quota.
+- Daily rerolls should be capped at **2 per `03:00 -> 03:00` app day**.
+- The daily quest action menu should show how many rerolls remain **today**; if the player already used both, the menu should say so explicitly, and if the reserve is empty before the quota is used the UI should say that no alternate dailies remain.
 - Each daily reroll should collect a **reason bucket** (for example timing, energy, relevance) and optionally a short custom note; that reroll feedback should be persisted and fed back into later LLM generation so the next daily pools can learn from what the user rejected.
 - Within a single generated weekly pool, daily quests must be **title-distinct and micro-action-distinct**; near-duplicate dailies (for example two versions of "Morning Stretch") are invalid.
 - Nightly rotation should prefer dailies that were **not visible the previous day** when the hidden pool has enough alternatives.
 - The generator should bias the daily pool toward **variety across stats/life areas**, and include at least one learning/knowledge-style daily when the user's dislikes and routine do not rule it out.
+- Likes, dislikes, and explicit focus text must always be injected into the quest-generation prompt so daily pools reflect what the player enjoys and avoid what they hate.
+- If the focus field is left blank, the system should let the **LLM choose one weekly focus** for the current weekly quest batch, persist that chosen focus on the profile, and bias the visible daily set and weekly boss toward that arc.
+- If the player keeps focus blank on later weekly generations, the system should treat the last AI-generated weekly focus as an **ongoing long-term arc** and continue it by default instead of resetting randomly.
+- In that blank-focus mode, the AI may still **evolve** the weekly focus into a sensible next chapter when recent behavior suggests progress, or **replace** it only when the prior direction clearly no longer fits the user's routine, dislikes, or rejection history.
+- Auto-chosen weekly focus should make the active daily set feel less soft: when the player's routine allows it, at least 2 visible dailies should feel like meaningful stretch tasks instead of pure maintenance chores.
 - Daily/boss pool generation should receive a **recent behavior summary** covering at least the last 7 app days of completions, skipped quests with reasons, and recently generated daily titles so the LLM can build on what worked and avoid stale repetition.
 - That recent behavior summary should also include **reroll feedback buckets + custom notes** when available, so the model can respond to "why this daily was swapped out" rather than only seeing completions and skips.
 - The frontend should still dedupe legacy dirty daily rows by normalized title as a final UI safeguard, so repeated generated tasks never render twice in the visible list.
 - If the user completes at least **80%** of the currently active daily quests, the day should count as sufficiently cleared for overnight penalty purposes; leftover dailies should not trigger HP/streak punishment on their own.
+- The required completion count for that 80% rule should be **rounded down**, with a minimum requirement of 1 objective whenever there are active daily objectives at all.
 - Active **good daily habits** should count toward that same daily objective pool and the same 80% overnight clear rule, so habit-building advances the day instead of living in a disconnected tracker.
 - The active daily set should refresh on a **nightly 03:00** cadence, and the UI should show a countdown to that reset.
 - The same `03:00 -> 03:00` app-day boundary must drive **streak progression**, `quest_date`, daily reroll limits, and daily-habit completion checks; the system must not use raw UTC 24-hour windows for those mechanics.
+- Entering the authenticated app after `03:00` should count as that day's **streak check-in** even before the user completes a quest, so streak continuity behaves like a game login streak rather than only a quest-completion streak.
+- The first post-fix app-entry check-in should also recover recently affected users whose previous app-day was settled before streak check-ins were being written, when the system can still see evidence of previous-day player activity.
 - Overnight settlement should not depend solely on a background cron existing in production. The app should also support an **authenticated idempotent settlement fallback** on first app open/return after reset, so HP penalties, streak breaks, and daily rotation still occur even if the scheduled trigger is delayed or missing.
 - On compact mobile HUD cards, the countdown should read as a centered three-line block: label, remaining time, then reset helper line.
 - The non-daily quest refresh quota should surface in quest action context (the `... more` menu / regenerate flow), not inside the top progress summary card.
@@ -113,6 +122,13 @@ Tasks are converted into quests.
 **Boss Quests** (Large challenges or milestones)
 - *Examples:* finish project, presentation, run 10k, publish article
 - *Reward:* Large XP, Achievement badge
+- The current weekly boss should feel like a **special locked challenge**, not just another task card.
+- Weekly bosses should carry explicit unlock requirements based on earlier quest progress, such as completing a certain number of daily objectives and/or side quests before the boss becomes available.
+- The quest UI should show both the **unlock rule** and the **remaining work** needed to open the boss, so the player can see exactly what is left.
+- Boss completion must be enforced server-side; a locked boss should not be completable even if the frontend is stale or bypassed.
+- For now, the current visible weekly boss should use deterministic gating tuned by difficulty:
+  - `hard` weekly boss: unlock after **3 daily objectives or 1 side quest**
+  - `epic` weekly boss: unlock after **4 daily objectives and 1 side quest**
 
 **Quest Chains** (Multi-step narrative quests)
 - *Logic:* Completing a Boss Quest (Step 1) unlocks a sequence of 2-4 connected tasks.
@@ -124,6 +140,7 @@ Tasks are converted into quests.
 - Life Rhythm and related quest-personalization inputs should not sit in an always-live editable state.
 - Settings should present the current quest setup in read-only form by default, with an explicit **Edit** action to change it.
 - In that read-only state, the saved **Current Life Rhythm** should render inside its own accented summary wrapper, visually aligned with the Likes / Dislikes / Focus summary cards.
+- If the user leaves Focus Areas blank, Settings should explain that lifeRPG will choose a weekly focus automatically, continue it across later weekly cycles unless the player overrides it, and display the latest AI-generated weekly focus in the read-only summary.
 - The **Regenerate Quests** action should only enable when the quest-setup form is actually dirty.
 - Regenerating quests from Settings should preserve progression state: **XP, level, gold, streak, stats, achievements, and other earned progress must remain untouched**.
 - Settings-based regeneration should not implicitly force-regenerate milestone rewards.
@@ -218,6 +235,7 @@ Separate from quests, users can define *Habits* that remain active day-to-day.
 - That completed-for-today signal should not be duplicated with an extra status pill if the checkbox/checkmark state already communicates it clearly.
 - Good habits should surface their fixed **XP reward** directly on the card, and the descriptive helper copy should sit under the title like quest-card subtitles.
 - Good habits should also surface their fixed **gold reward** on the card.
+- Habit stat gain/context should use the same lightweight **eyebrow line** as quest cards, above the title, with the shared stat icon/color language from the Character screen instead of a separate footer chip style.
 - When the player creates a custom habit directly, the starter reward values should be **profile-aware** (at minimum considering level, habit polarity, and frequency) rather than using one flat reward for everyone.
 
 ### 4.9 Shop & Economy System
@@ -421,11 +439,21 @@ The core user loop:
 - **2026-03-11 - Daily Progress Counter Alignment:** The shared daily-progress HUD now centers the `x/y` fraction and its wrapped descriptor as one aligned unit, avoiding the awkward top-heavy counter/text relationship on small mobile widths.
 - **2026-03-11 - Quest Setup Summary Visual Parity:** The read-only Settings summary now gives `Current Life Rhythm` the same card-family treatment as Likes / Dislikes / Focus, using an amber-accented wrapper instead of leaving the main routine text visually floating on the parent panel.
 - **2026-03-11 - Legacy Quest Gold Minimums:** Quest gold rewards now clamp upward to the current type+difficulty baseline instead of blindly trusting stale low stored values. This keeps older hard bosses and similar content economically aligned with the Bazaar loop without requiring manual cleanup first.
+- **2026-03-11 - Bazaar Inventory Density:** The Bazaar inventory section now treats its helper copy as supporting text beneath the title instead of a side caption, and owned items use a denser horizontal card layout so stacked inventory remains scannable on mobile.
+- **2026-03-11 - Shared Stat Icon Language:** Quest cards and the Character stats panel now share one stat-presentation map for labels, icons, and accent colors. On quest cards the stat marker sits above the title as lightweight context instead of competing with XP/gold in the footer.
+- **2026-03-11 - Retro HUD Meter Treatment:** The dashboard's XP and HP bars now use a shared segmented pixel-HUD component with square frames, icon badges, and discrete meter cells. This keeps the hero card more game-like without sacrificing exact numeric readability.
+- **2026-03-11 - Quest Stat Eyebrow:** Quest stat context now stays above the title but no longer uses pill/badge chrome. The stat indicator is a plain icon+label eyebrow so the card hierarchy remains lighter and more compact.
+- **2026-03-11 - Defensive Inventory Stacking:** Static magical goods already stack at purchase time, but Bazaar inventory rendering now also normalizes stackable rows client-side and orders them by recent update. This keeps legacy or cached inventory views from visually fragmenting identical owned goods.
 - **2026-03-11 - Habit Completion Signal Simplification:** Habit cards now trust the left checkbox/checkmark as the primary “done today” signal and drop the extra status pill, reducing repeated state labels without losing clarity.
 - **2026-03-11 - App-Day Boundary Ownership:** Streaks, `quest_date`, daily reroll limits, countdown anchoring, and daily-habit progress now all derive from one shared `03:00 -> 03:00` app-day key instead of mixing UTC day splits with local UI assumptions. This keeps streak progression coherent across quest completion, nightly penalties, and daily HUD reads.
 - **2026-03-11 - Recent Behavior Prompt Memory:** Quest-generation prompts now include a short summary of the last 7 app days: completed quests, skipped quests with reasons, successful stat lanes, and recently generated daily titles. This gives the LLM enough behavioral memory to vary pools instead of repeating stale daily patterns.
+- **2026-03-11 - AI-Owned Weekly Focus For Blank Focus Mode:** When the player leaves focus blank or explicitly asks the system to choose, quest generation now asks the LLM to emit a short `weekly_focus` for the current weekly batch. That focus is persisted on the profile for Settings display, reused as the default long-term arc for later blank-focus weeks, and only evolves or changes when recent behavior meaningfully justifies it. The active daily slice is also rebalanced so the visible week is not dominated by soft maintenance chores.
+- **2026-03-11 - Weekly Boss Unlock Gate:** Weekly bosses are now treated as gated encounters rather than immediately playable cards. Unlock requirements are stored directly on the quest row, computed deterministically from boss difficulty plus current pool size, shown in the UI with remaining counts, and rechecked in `complete-quest` so the rule is enforced server-side as well as visually.
 - **2026-03-11 - Authenticated Daily Settlement Fallback:** Nightly HP/streak settlement and daily-pool rotation no longer depend only on a server cron. The app can now trigger an idempotent per-user settlement on authenticated entry/visibility return, keyed by `last_daily_settlement_day`, so missed schedules do not silently suppress penalties or daily refreshes.
 - **2026-03-11 - Reroll Feedback as LLM Memory:** Daily rerolls now collect structured reason buckets plus optional custom notes, persist them as `quest_feedback`, and fold recent reroll signals into generation/regeneration prompts. This gives the model a usable rejection-history memory instead of relying only on completion/skip outcomes.
 - **2026-03-11 - Inventory-Based Bazaar Ownership:** Bazaar purchases no longer apply immediately. Static magical goods and dynamic personalized offers are both stored as inventory entries, can stack, and are consumed/redeemed later via a dedicated inventory flow.
 - **2026-03-11 - Profile-Aware Habit / Custom Quest Rewards:** Custom habits now derive XP/gold/stat rewards from frequency, polarity, and current level, while custom quest forging considers current level, stats, life rhythm, and preference context when assigning difficulty and rewards.
 - **2026-03-11 - Hero HUD Copy Reduction:** The dashboard hero card no longer repeats an economy helper sentence under the player name; quest gold is already visible in cards and Bazaar, so the top HUD stays denser and cleaner without repeating that loop.
+- **2026-03-11 - Daily Reroll Quota Ownership:** Daily rerolls are no longer exposed as a raw reserve count. The system still swaps from the existing hidden daily pool, but player-facing allowance is now capped at 2 rerolls per `03:00 -> 03:00` app day and the UI distinguishes quota exhaustion from reserve exhaustion.
+- **2026-03-11 - Shared Protected Runtime Cache:** Protected-app reads now prefer short-lived shared snapshots with in-flight promise deduplication. Frontend edge calls no longer pre-validate every token with network `getUser()` calls, habit state is shared between Dashboard and Habits, streak reads reuse the same cache path, and authenticated daily-settlement checks are throttled per user/app day so idle tab switches or visibility changes do not spam Supabase.
+- **2026-03-11 - Persistent Streak Cache Scope:** The streak chip on the dashboard now uses a narrow localStorage-backed cache layer on top of the shared runtime cache so full browser refreshes do not immediately trigger another `streaks` read. This persistence is intentionally limited to streak data; higher-churn quest and habit payloads remain memory-only to avoid stale gameplay state after reloads.

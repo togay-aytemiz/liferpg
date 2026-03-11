@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callOpenAI } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
+import { getBossUnlockConfig } from "../../../src/lib/bossUnlock.ts";
 
 const VALID_TYPES = new Set(["daily", "side", "boss"]);
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
@@ -70,6 +71,24 @@ serve(async (req) => {
             .select("level, stat_strength, stat_knowledge, stat_wealth, stat_adventure, stat_social, life_rhythm, likes, dislikes, focus_areas")
             .eq("id", user.id)
             .single();
+
+        const [
+            { count: activeDailyCount },
+            { count: activeSideCount },
+        ] = await Promise.all([
+            supabase
+                .from("quests")
+                .select("*", { count: "exact", head: true })
+                .eq("user_id", user.id)
+                .eq("is_active", true)
+                .eq("quest_type", "daily"),
+            supabase
+                .from("quests")
+                .select("*", { count: "exact", head: true })
+                .eq("user_id", user.id)
+                .eq("is_active", true)
+                .eq("quest_type", "side"),
+        ]);
 
         const systemPrompt = `You are a game master for a real-life habit tracker RPG.
 	The user wants to add ONE custom quest (type: ${targetType}).
@@ -142,6 +161,13 @@ Return EXACTLY one JSON object with this structure:
             aiGoldReward,
             getQuestGoldReward(targetType as "daily" | "side" | "boss", difficulty as "easy" | "medium" | "hard" | "epic"),
         );
+        const bossUnlockConfig = targetType === "boss"
+            ? getBossUnlockConfig({
+                difficulty: difficulty as "easy" | "medium" | "hard" | "epic",
+                activeDailyCount: activeDailyCount ?? 0,
+                sideQuestCount: activeSideCount ?? 0,
+            })
+            : { unlock_daily_required: 0, unlock_side_required: 0, unlock_rule_mode: "all" as const };
 
         const { data: newQuest, error: insertError } = await supabase
             .from("quests")
@@ -158,6 +184,9 @@ Return EXACTLY one JSON object with this structure:
                 is_active: true,
                 is_ai_generated: true,
                 is_custom: true,
+                unlock_daily_required: bossUnlockConfig.unlock_daily_required,
+                unlock_side_required: bossUnlockConfig.unlock_side_required,
+                unlock_rule_mode: bossUnlockConfig.unlock_rule_mode,
             })
             .select()
             .single();

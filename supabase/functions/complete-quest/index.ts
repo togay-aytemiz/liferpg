@@ -11,8 +11,10 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
-import { getAppDayKey, getPreviousAppDayKey } from "../../../src/lib/appDay.ts";
+import { getAppDayKey } from "../../../src/lib/appDay.ts";
 import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
+import { evaluateBossUnlock } from "../../../src/lib/bossUnlock.ts";
+import { applyAppDayCheckIn } from "../../../src/lib/streaks.ts";
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -60,6 +62,49 @@ serve(async (req) => {
             );
         }
 
+        if (
+            quest.quest_type === "boss" &&
+            ((quest.unlock_daily_required ?? 0) > 0 || (quest.unlock_side_required ?? 0) > 0)
+        ) {
+            const { data: prerequisiteRows, error: prerequisiteError } = await supabase
+                .from("user_quests")
+                .select("quest_id, completed_at, quests!inner(quest_type)")
+                .eq("user_id", user.id)
+                .eq("is_completed", true)
+                .gte("completed_at", quest.created_at);
+
+            if (prerequisiteError) {
+                return new Response(
+                    JSON.stringify({ error: "Failed to verify boss prerequisites", details: prerequisiteError.message }),
+                    { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+
+            const dailyCompleted = (prerequisiteRows ?? []).filter((row: any) => row.quests?.quest_type === "daily").length;
+            const sideCompleted = (prerequisiteRows ?? []).filter((row: any) => row.quests?.quest_type === "side").length;
+            const unlockProgress = evaluateBossUnlock(
+                {
+                    unlock_daily_required: quest.unlock_daily_required ?? 0,
+                    unlock_side_required: quest.unlock_side_required ?? 0,
+                    unlock_rule_mode: (quest.unlock_rule_mode ?? "all") as "any" | "all",
+                },
+                {
+                    daily_completed: dailyCompleted,
+                    side_completed: sideCompleted,
+                },
+            );
+
+            if (!unlockProgress.unlocked) {
+                return new Response(
+                    JSON.stringify({
+                        error: "Boss quest is still locked.",
+                        unlock_progress: unlockProgress,
+                    }),
+                    { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+        }
+
         // Guard: check if already completed today (prevent duplicate XP)
         const today = getAppDayKey();
         const { data: existingCompletion } = await supabase
@@ -91,7 +136,8 @@ serve(async (req) => {
             .eq("user_id", user.id)
             .single();
 
-        const xpMultiplier = streak?.xp_multiplier ?? 1.0;
+        const streakCheckIn = applyAppDayCheckIn(streak ?? null, today);
+        const xpMultiplier = streakCheckIn.xpMultiplier;
         const baseXP = quest.xp_reward ?? 15;
         const awardedXP = Math.round(baseXP * xpMultiplier);
         const awardedGold = getQuestGoldReward(quest.quest_type, quest.difficulty, quest.gold_reward);
@@ -185,35 +231,10 @@ serve(async (req) => {
             }
         }
 
-        // 5. Update streak from completed app-day history so stale UTC-era rows self-correct.
-        const { data: completedDayRows } = await supabase
-            .from("user_quests")
-            .select("quest_date")
-            .eq("user_id", user.id)
-            .eq("is_completed", true)
-            .order("quest_date", { ascending: false })
-            .limit(120);
-
-        const completedAppDays = new Set((completedDayRows ?? []).map((row: { quest_date: string }) => row.quest_date));
-
-        let newStreak = 0;
-        let cursorDay = today;
-        while (completedAppDays.has(cursorDay)) {
-            newStreak += 1;
-            cursorDay = getPreviousAppDayKey(cursorDay);
-        }
-
-        if (newStreak === 0) {
-            newStreak = 1;
-        }
-
-        const longestStreak = Math.max(newStreak, streak?.longest_streak ?? 0);
-
-        // Calculate XP multiplier based on streak
-        let newMultiplier = 1.0;
-        if (newStreak >= 30) newMultiplier = 1.25;
-        else if (newStreak >= 7) newMultiplier = 1.10;
-        else if (newStreak >= 3) newMultiplier = 1.05;
+        // 5. Update streak using the shared app-day check-in rule.
+        const newStreak = streakCheckIn.currentStreak;
+        const longestStreak = streakCheckIn.longestStreak;
+        const newMultiplier = streakCheckIn.xpMultiplier;
 
         await supabase
             .from("streaks")
@@ -221,7 +242,7 @@ serve(async (req) => {
                 user_id: user.id,
                 current_streak: newStreak,
                 longest_streak: longestStreak,
-                last_active_date: today,
+                last_active_date: streakCheckIn.lastActiveDate,
                 xp_multiplier: newMultiplier,
             }, { onConflict: "user_id" });
 

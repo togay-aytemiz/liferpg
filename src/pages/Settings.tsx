@@ -191,9 +191,16 @@ export default function Settings() {
                                 </div>
                                 <div className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-3">
                                     <p className="text-[10px] font-heading tracking-[0.18em] text-blue-400 uppercase">Focus</p>
-                                    <p className="mt-1 text-xs text-slate-400">{profile?.focus_areas || 'None set'}</p>
+                                    <p className="mt-1 text-xs text-slate-400">{profile?.focus_areas || 'AI chooses it and can keep evolving the same long-term arc'}</p>
                                 </div>
                             </div>
+                            {profile?.ai_weekly_focus && (
+                                <div className="rounded-lg border border-amber-900/40 bg-amber-950/10 p-3 shadow-inner-panel">
+                                    <p className="text-[10px] font-heading tracking-[0.18em] text-amber-300 uppercase">AI Weekly Focus</p>
+                                    <p className="mt-1 text-sm text-slate-200">{profile.ai_weekly_focus}</p>
+                                    <p className="mt-1 text-[11px] text-slate-500">Stays in play until you set a manual focus or the system finds a stronger next chapter.</p>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <>
@@ -233,9 +240,12 @@ export default function Settings() {
                                     <textarea
                                         value={focusAreas}
                                         onChange={(e) => setFocusAreas(e.target.value)}
-                                        placeholder="Career, saving money, learning Spanish..."
+                                        placeholder="Career, saving money, learning Spanish... Leave blank to let lifeRPG choose a weekly focus."
                                         className="w-full min-h-[60px] p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 resize-none text-sm"
                                     />
+                                    <p className="mt-1 text-[11px] text-slate-500">
+                                        Leave this blank if you want the AI to choose and carry forward a weekly focus until you manually steer it elsewhere.
+                                    </p>
                                 </div>
                             </div>
                             <button

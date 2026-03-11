@@ -7,6 +7,8 @@ type RerollReasonModalProps = {
     open: boolean;
     quest: Quest | null;
     remainingAlternatives: number;
+    quotaRemaining?: number;
+    reserveRemaining?: number;
     loading?: boolean;
     onClose: () => void;
     onConfirm: (reasonBucket: RerollReasonBucket, reasonDetail?: string) => void | Promise<void>;
@@ -16,6 +18,8 @@ export default function RerollReasonModal({
     open,
     quest,
     remainingAlternatives,
+    quotaRemaining = remainingAlternatives,
+    reserveRemaining = remainingAlternatives,
     loading = false,
     onClose,
     onConfirm,
@@ -53,8 +57,12 @@ export default function RerollReasonModal({
                         </p>
                         <p className="mt-2 text-xs text-slate-500">
                             {remainingAlternatives > 0
-                                ? `${remainingAlternatives} alternate ${remainingAlternatives === 1 ? 'daily is' : 'dailies are'} available in your reserve.`
-                                : 'No alternate dailies are left in the current reserve.'}
+                                ? `${remainingAlternatives} reroll${remainingAlternatives === 1 ? '' : 's'} left today.`
+                                : quotaRemaining <= 0
+                                    ? 'You have used both daily rerolls for this app day.'
+                                    : reserveRemaining <= 0
+                                        ? 'No alternate dailies are left in the current reserve.'
+                                        : 'No rerolls are available right now.'}
                         </p>
                     </div>
                 </div>

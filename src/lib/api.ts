@@ -8,7 +8,6 @@ import { invalidateQuestRuntime } from './questRuntime';
 import {
     getAwardsCacheKey,
     getDashboardStreakCacheKey,
-    getHabitsCacheKey,
     getInventoryCacheKey,
     getShopCacheKey,
     invalidateCachedValue,
@@ -16,6 +15,7 @@ import {
 import { emitAppRuntimeChanged, emitHabitRuntimeChanged } from './habitEvents';
 import type { RerollReasonBucket } from './rerollReasons';
 import { getSuggestedHabitRewards } from './habitGameplay';
+import { invalidateHabitSnapshot } from './habitSnapshot';
 
 interface GenerateQuestsResponse {
     success: boolean;
@@ -38,6 +38,8 @@ interface ParsedEdgeResponse {
 
 const EDGE_FUNCTIONS_BASE_URL = `${supabaseUrl.replace(/\/$/, '')}/functions/v1`;
 const dailySettlementInflight = new Map<string, Promise<DailySettlementResponse>>();
+const dailySettlementResultCache = new Map<string, { result: DailySettlementResponse; expiresAt: number }>();
+const DAILY_SETTLEMENT_RESULT_TTL_MS = 60_000;
 
 function isUnauthorizedStatus(status: number, message: string | null): boolean {
     if (status === 401) return true;
@@ -69,42 +71,29 @@ async function parseEdgeResponse(response: Response): Promise<ParsedEdgeResponse
     };
 }
 
-async function isAccessTokenValid(accessToken: string): Promise<boolean> {
-    const { data, error } = await supabase.auth.getUser(accessToken);
-    return !error && !!data.user;
-}
-
-async function getValidAccessToken(): Promise<string> {
+async function getSessionContext(options?: { forceRefresh?: boolean }) {
     const { data: { session } } = await supabase.auth.getSession();
-    const expiresSoon = session?.expires_at
-        ? (session.expires_at * 1000) <= (Date.now() + 30_000)
+    let activeSession = session;
+    const expiresSoon = activeSession?.expires_at
+        ? (activeSession.expires_at * 1000) <= (Date.now() + 30_000)
         : false;
 
-    if (session?.access_token && !expiresSoon && await isAccessTokenValid(session.access_token)) {
-        return session.access_token;
+    if (options?.forceRefresh || expiresSoon) {
+        const { data, error } = await supabase.auth.refreshSession();
+        if (error || !data.session?.access_token || !data.session.user) {
+            throw new Error('Session expired. Please sign in again.');
+        }
+        activeSession = data.session;
     }
 
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error || !data.session?.access_token) {
+    if (!activeSession?.access_token || !activeSession.user) {
         throw new Error('Session expired. Please sign in again.');
     }
 
-    const refreshedTokenIsValid = await isAccessTokenValid(data.session.access_token);
-    if (!refreshedTokenIsValid) {
-        throw new Error('Session expired. Please sign in again.');
-    }
-
-    return data.session.access_token;
-}
-
-async function getValidUser() {
-    const accessToken = await getValidAccessToken();
-    const { data, error } = await supabase.auth.getUser(accessToken);
-    if (error || !data.user) {
-        throw new Error('Session expired. Please sign in again.');
-    }
-
-    return { accessToken, user: data.user };
+    return {
+        accessToken: activeSession.access_token,
+        user: activeSession.user,
+    };
 }
 
 async function getSessionUserId(): Promise<string | null> {
@@ -133,17 +122,12 @@ async function invokeEdgeFunction<T>(
     body: EdgeJsonBody,
     fallbackError: string
 ): Promise<T> {
-    let accessToken = await getValidAccessToken();
+    let { accessToken } = await getSessionContext();
     let response = await postEdgeFunction(name, accessToken, body);
     let parsed = await parseEdgeResponse(response);
 
     if (isUnauthorizedStatus(response.status, parsed.message)) {
-        const { data, error } = await supabase.auth.refreshSession();
-        if (error || !data.session?.access_token) {
-            throw new Error('Session expired. Please sign in again.');
-        }
-
-        accessToken = data.session.access_token;
+        ({ accessToken } = await getSessionContext({ forceRefresh: true }));
         response = await postEdgeFunction(name, accessToken, body);
         parsed = await parseEdgeResponse(response);
 
@@ -164,7 +148,7 @@ async function invokeEdgeFunction<T>(
  * Used after onboarding when user submits their life rhythm for the first time.
  */
 export async function generateQuests(lifeRhythm: string): Promise<GenerateQuestsResponse> {
-    const { user } = await getValidUser();
+    const { user } = await getSessionContext();
 
     // Fetch active habits context
     const { data: activeHabits } = await supabase
@@ -189,7 +173,7 @@ export async function generateQuests(lifeRhythm: string): Promise<GenerateQuests
  * Deactivates old AI quests and generates new ones.
  */
 export async function regenerateQuests(lifeRhythm: string): Promise<GenerateQuestsResponse> {
-    const { user } = await getValidUser();
+    const { user } = await getSessionContext();
 
     // Fetch active habits context
     const { data: activeHabits } = await supabase
@@ -226,12 +210,15 @@ export interface CompleteQuestResponse {
 export interface DailySettlementResponse {
     success: boolean;
     settled: boolean;
+    checked_in: boolean;
     current_app_day: string;
     previous_app_day: string;
     hp_penalty: number;
     freeze_consumed: boolean;
     streak_reset: boolean;
     rotated_daily_pool: boolean;
+    streak: number;
+    xp_multiplier: number;
 }
 
 /**
@@ -257,8 +244,13 @@ export async function completeQuest(questId: string): Promise<CompleteQuestRespo
 }
 
 export async function settleDailyIfNeeded(): Promise<DailySettlementResponse> {
-    const { user } = await getValidUser();
+    const { user } = await getSessionContext();
     const cacheKey = `${user.id}:${getAppDayKey()}`;
+    const cached = dailySettlementResultCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.result;
+    }
+
     const existing = dailySettlementInflight.get(cacheKey);
     if (existing) {
         return existing;
@@ -269,13 +261,17 @@ export async function settleDailyIfNeeded(): Promise<DailySettlementResponse> {
         {},
         'Failed to settle daily state',
     ).then((response) => {
-        if (response.settled) {
+        if (response.settled || response.checked_in) {
             invalidateQuestRuntime(user.id);
             invalidateCachedValue(getDashboardStreakCacheKey(user.id));
             invalidateCachedValue(getShopCacheKey(user.id));
             emitAppRuntimeChanged();
         }
 
+        dailySettlementResultCache.set(cacheKey, {
+            result: response,
+            expiresAt: Date.now() + DAILY_SETTLEMENT_RESULT_TTL_MS,
+        });
         return response;
     }).finally(() => {
         dailySettlementInflight.delete(cacheKey);
@@ -415,6 +411,7 @@ export async function logHabit(habitId: string): Promise<any> {
     invalidateCachedValue(getShopCacheKey(session.user.id));
     invalidateCachedValue(getDashboardStreakCacheKey(session.user.id));
     invalidateQuestRuntime(session.user.id);
+    invalidateHabitSnapshot(session.user.id);
     emitHabitRuntimeChanged();
 
     return data;
@@ -470,7 +467,7 @@ export async function convertToHabit(questTitle: string, statAffected?: string |
         throw new Error(error.message || 'Failed to convert to habit');
     }
 
-    invalidateCachedValue(getHabitsCacheKey(session.user.id));
+    invalidateHabitSnapshot(session.user.id);
     invalidateQuestRuntime(session.user.id);
     emitHabitRuntimeChanged();
     return insertedHabit as Habit;

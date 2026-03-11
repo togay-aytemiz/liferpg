@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import AppHeader from '../components/AppHeader';
 import { supabase } from '../lib/supabase';
 import type { Achievement, UserAchievement } from '../lib/database.types';
 import { getAwardsCacheKey, readCachedValue, STATIC_VIEW_CACHE_TTL_MS, writeCachedValue } from '../lib/viewCache';
-import { Brain, Coins, Compass, Dumbbell, Trophy, Users } from 'lucide-react';
+import { Trophy } from 'lucide-react';
+import { getProfileStatRows } from '../lib/statPresentation';
 
 type AwardsSnapshot = {
     achievements: Achievement[];
@@ -77,40 +77,6 @@ export default function Achievements() {
         legendary: { border: 'border-amber-600', bg: 'bg-amber-900/30', text: 'text-amber-400' },
     };
 
-    // Stats
-    const statLabels: Record<string, { label: string; color: string; icon: ReactNode; iconClass: string }> = {
-        stat_strength: {
-            label: 'Strength',
-            color: 'bg-red-500',
-            icon: <Dumbbell className="h-4 w-4" />,
-            iconClass: 'text-red-400',
-        },
-        stat_knowledge: {
-            label: 'Knowledge',
-            color: 'bg-blue-500',
-            icon: <Brain className="h-4 w-4" />,
-            iconClass: 'text-blue-400',
-        },
-        stat_wealth: {
-            label: 'Wealth',
-            color: 'bg-amber-500',
-            icon: <Coins className="h-4 w-4" />,
-            iconClass: 'text-amber-400',
-        },
-        stat_adventure: {
-            label: 'Adventure',
-            color: 'bg-emerald-500',
-            icon: <Compass className="h-4 w-4" />,
-            iconClass: 'text-emerald-400',
-        },
-        stat_social: {
-            label: 'Social',
-            color: 'bg-fuchsia-500',
-            icon: <Users className="h-4 w-4" />,
-            iconClass: 'text-fuchsia-400',
-        },
-    };
-
     return (
         <div className="flex-1 flex flex-col animate-in fade-in duration-500">
             <AppHeader
@@ -134,11 +100,11 @@ export default function Achievements() {
                 <div>
                     <h2 className="font-heading text-lg text-slate-300 mb-3">Stats</h2>
                     <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-3 shadow-hud">
-                        {Object.entries(statLabels).map(([key, { label, color, icon, iconClass }]) => {
-                            const val = (profile as unknown as Record<string, unknown>)?.[key] as number ?? 0;
+                        {getProfileStatRows(profile).map(({ key, label, color, icon, iconClass, value }) => {
+                            const val = value;
                             const pct = Math.min((val / 100) * 100, 100);
                             return (
-                                <div key={key} className="flex items-center gap-3">
+                                <div key={String(key)} className="flex items-center gap-3">
                                     <span className={`inline-flex w-28 items-center gap-2 text-xs ${iconClass}`}>
                                         {icon}
                                         <span className="text-slate-300">{label}</span>
