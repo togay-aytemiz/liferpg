@@ -134,7 +134,7 @@ export default function QuestCard({
                 </div>
 
                 {quest.description && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{quest.description}</p>
+                    <p className="mt-0.5 line-clamp-3 text-xs text-slate-500">{quest.description}</p>
                 )}
 
                 {isBossLocked && bossUnlockProgress && (

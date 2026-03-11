@@ -41,9 +41,20 @@ export function getVisibleDailyQuests(quests: Quest[]): Quest[] {
         .filter((quest) => quest.quest_type === 'daily')
         .sort(compareVisibleDailyPriority);
 
-    const uniqueDailyQuests = dedupeDailyPool(dailyQuests, { preferActive: true });
+    const customDailyQuests = dedupeDailyPool(
+        dailyQuests.filter((quest) => quest.is_custom),
+        { preferActive: true },
+    ).sort(compareVisibleDailyPriority);
 
-    return uniqueDailyQuests.slice(0, getManageableDailyCount(uniqueDailyQuests.length));
+    const aiDailyQuests = dedupeDailyPool(
+        dailyQuests.filter((quest) => !quest.is_custom),
+        { preferActive: true },
+    );
+
+    return [
+        ...customDailyQuests,
+        ...aiDailyQuests.slice(0, getManageableDailyCount(aiDailyQuests.length)),
+    ];
 }
 
 export function getDailyQuestProgress(visibleDailyQuests: Quest[], completedIds: Set<string>) {

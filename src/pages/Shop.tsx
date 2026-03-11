@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import AppHeader from '../components/AppHeader';
 import { supabase } from '../lib/supabase';
@@ -8,7 +8,7 @@ import { clearPersistedShopOffers, readPersistedShopOffers, writePersistedShopOf
 import {
     Coins, Heart, Star, Shield, AlertCircle, Check,
     Coffee, Tv, Sparkles, BookOpen, Dumbbell, Map, Gamepad2, Users,
-    RefreshCw, Clock, Package
+    RefreshCw, Package
 } from 'lucide-react';
 import { STATIC_SHOP_ITEM_LIST, type StaticShopItemKey } from '../lib/shopCatalog';
 import {
@@ -63,12 +63,74 @@ export default function Shop() {
     const [buyingId, setBuyingId] = useState<string | null>(null);
     const [usingInventoryId, setUsingInventoryId] = useState<string | null>(null);
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+    const [nowMs, setNowMs] = useState(() => Date.now());
+    const isRefreshingExpiredOffersRef = useRef(false);
 
     useEffect(() => {
         if (typeof profile?.gold === 'number') {
             setGold(profile.gold);
         }
     }, [profile?.gold]);
+
+    const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3000);
+    };
+
+    const handleGenerateShop = useCallback(async () => {
+        if (!user) return;
+
+        setGenerating(true);
+        try {
+            const res = await generateShopItems();
+            if (res.success && res.items) {
+                const sorted = writePersistedShopOffers(user.id, [...res.items].sort((a, b) => a.cost - b.cost));
+                setDynamicItems(sorted);
+                showToast("The Merchant has fresh wares for you!", "success");
+            }
+        } catch (error: any) {
+            console.error("Failed to generate shop:", error);
+            showToast("The Merchant is currently away gathering new items.", "error");
+        }
+        setGenerating(false);
+    }, [user]);
+
+    const fetchData = useCallback(async () => {
+        if (!user) return;
+
+        setLoading(true);
+
+        const nowIso = new Date().toISOString();
+        const [{ data: items }, { data: inventoryRows }] = await Promise.all([
+            supabase
+                .from('shop_items')
+                .select('*')
+                .eq('user_id', user.id)
+                .eq('is_purchased', false)
+                .gt('expires_at', nowIso)
+                .order('created_at', { ascending: true })
+                .order('cost', { ascending: true }),
+            supabase
+                .from('inventory_items')
+                .select('*')
+                .eq('user_id', user.id)
+                .eq('is_redeemed', false)
+                .order('updated_at', { ascending: false }),
+        ]);
+
+        if (items && items.length > 0) {
+            const nextItems = writePersistedShopOffers(user.id, items as ShopItem[]);
+            setDynamicItems(nextItems);
+        } else {
+            await handleGenerateShop();
+        }
+
+        const nextInventory = normalizeInventoryStacks((inventoryRows as InventoryItem[] | null) ?? []);
+        setInventoryItems(nextInventory);
+        writeCachedValue(getInventoryCacheKey(user.id), nextInventory, STATIC_VIEW_CACHE_TTL_MS);
+
+        setLoading(false);
+    }, [handleGenerateShop, user]);
 
     useEffect(() => {
         if (!user) return;
@@ -88,64 +150,8 @@ export default function Shop() {
             return;
         }
 
-        fetchData();
-    }, [user]);
-
-    const fetchData = async () => {
-        setLoading(true);
-
-        const nowIso = new Date().toISOString();
-        const [{ data: items }, { data: inventoryRows }] = await Promise.all([
-            supabase
-                .from('shop_items')
-                .select('*')
-                .eq('user_id', user!.id)
-                .eq('is_purchased', false)
-                .gt('expires_at', nowIso)
-                .order('created_at', { ascending: true })
-                .order('cost', { ascending: true }),
-            supabase
-                .from('inventory_items')
-                .select('*')
-                .eq('user_id', user!.id)
-                .eq('is_redeemed', false)
-                .order('updated_at', { ascending: false }),
-        ]);
-
-        if (items && items.length > 0) {
-            const nextItems = writePersistedShopOffers(user!.id, items as ShopItem[]);
-            setDynamicItems(nextItems);
-        } else {
-            await handleGenerateShop();
-        }
-
-        const nextInventory = normalizeInventoryStacks((inventoryRows as InventoryItem[] | null) ?? []);
-        setInventoryItems(nextInventory);
-        writeCachedValue(getInventoryCacheKey(user!.id), nextInventory, STATIC_VIEW_CACHE_TTL_MS);
-
-        setLoading(false);
-    };
-
-    const handleGenerateShop = async () => {
-        setGenerating(true);
-        try {
-            const res = await generateShopItems();
-            if (res.success && res.items) {
-                const sorted = writePersistedShopOffers(user!.id, [...res.items].sort((a, b) => a.cost - b.cost));
-                setDynamicItems(sorted);
-                showToast("The Merchant has fresh wares for you!", "success");
-            }
-        } catch (error: any) {
-            console.error("Failed to generate shop:", error);
-            showToast("The Merchant is currently away gathering new items.", "error");
-        }
-        setGenerating(false);
-    };
-
-    const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
-        setToast({ msg, type });
-        setTimeout(() => setToast(null), 3000);
-    };
+        void fetchData();
+    }, [fetchData, user]);
 
     const upsertInventoryItem = (inventoryItem?: InventoryItem | null) => {
         if (!inventoryItem) return;
@@ -262,11 +268,53 @@ export default function Shop() {
         }
     };
 
-    const formatDaysLeft = (isoString: string) => {
-        const diff = new Date(isoString).getTime() - new Date().getTime();
-        const days = Math.ceil(diff / (1000 * 3600 * 24));
-        return days > 0 ? `${days}d left` : 'Expiring soon';
+    const personalizedOfferExpiresAt = useMemo(() => {
+        if (dynamicItems.length === 0) return null;
+        return Math.min(...dynamicItems.map((item) => new Date(item.expires_at).getTime()));
+    }, [dynamicItems]);
+
+    useEffect(() => {
+        if (dynamicItems.length === 0) return undefined;
+
+        const interval = window.setInterval(() => {
+            setNowMs(Date.now());
+        }, 1000);
+
+        return () => window.clearInterval(interval);
+    }, [dynamicItems.length]);
+
+    useEffect(() => {
+        if (!user || !personalizedOfferExpiresAt || loading || generating) return;
+        if (personalizedOfferExpiresAt > nowMs) return;
+        if (isRefreshingExpiredOffersRef.current) return;
+
+        isRefreshingExpiredOffersRef.current = true;
+        clearPersistedShopOffers(user.id);
+        setDynamicItems([]);
+
+        void fetchData().finally(() => {
+            isRefreshingExpiredOffersRef.current = false;
+        });
+    }, [fetchData, generating, loading, nowMs, personalizedOfferExpiresAt, user]);
+
+    const formatOfferRotationCountdown = (expiresAtMs: number | null) => {
+        if (!expiresAtMs) return null;
+
+        const diff = Math.max(0, expiresAtMs - nowMs);
+        const totalSeconds = Math.floor(diff / 1000);
+        const days = Math.floor(totalSeconds / 86_400);
+        const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+        const minutes = Math.floor((totalSeconds % 3_600) / 60);
+        const seconds = totalSeconds % 60;
+
+        if (days > 0) {
+            return `${days}d ${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
+        }
+
+        return `${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
     };
+
+    const personalizedOfferCountdown = formatOfferRotationCountdown(personalizedOfferExpiresAt);
 
     return (
         <div className="flex-1 flex flex-col animate-in fade-in duration-500 bg-slate-950">
@@ -373,15 +421,22 @@ export default function Shop() {
 
                 {/* DYNAMIC REAL-LIFE REWARDS */}
                 <section className="space-y-4">
-                    <div className="flex items-center justify-between px-2">
-                        <h2 className="font-heading text-lg text-white flex items-center gap-2">
-                            <Sparkles className="w-5 h-5 text-amber-400" />
-                            Personalized Offers
-                        </h2>
-                        {generating && (
-                            <span className="text-xs text-amber-500/80 flex items-center gap-1 animate-pulse">
-                                <RefreshCw className="w-3 h-3 animate-spin text-amber-500" /> Merchant is thinking...
-                            </span>
+                    <div className="px-2">
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="font-heading text-lg text-white flex items-center gap-2">
+                                <Sparkles className="w-5 h-5 text-amber-400" />
+                                Personalized Offers
+                            </h2>
+                            {generating && (
+                                <span className="text-xs text-amber-500/80 flex items-center gap-1 animate-pulse shrink-0">
+                                    <RefreshCw className="w-3 h-3 animate-spin text-amber-500" /> Merchant is thinking...
+                                </span>
+                            )}
+                        </div>
+                        {personalizedOfferCountdown && !generating && (
+                            <p className="mt-1 pl-7 text-xs text-slate-500">
+                                Refreshes in {personalizedOfferCountdown}
+                            </p>
                         )}
                     </div>
 
@@ -421,9 +476,6 @@ export default function Shop() {
                                                 <div className={`flex items-center gap-1.5 font-mono font-bold text-sm ${canAfford ? 'text-amber-500' : 'text-red-500/70'}`}>
                                                     <Coins className="w-4 h-4" />
                                                     {item.cost}
-                                                </div>
-                                                <div className="flex items-center gap-1 text-[10px] text-slate-500 mt-1">
-                                                    <Clock className="w-3 h-3" /> {formatDaysLeft(item.expires_at)}
                                                 </div>
                                             </div>
 
