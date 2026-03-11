@@ -11,6 +11,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { getAppDayKey, getPreviousAppDayKey } from "../../../src/lib/appDay.ts";
 import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
 
 serve(async (req) => {
@@ -60,7 +61,7 @@ serve(async (req) => {
         }
 
         // Guard: check if already completed today (prevent duplicate XP)
-        const today = new Date().toISOString().split("T")[0];
+        const today = getAppDayKey();
         const { data: existingCompletion } = await supabase
             .from("user_quests")
             .select("id")
@@ -184,17 +185,26 @@ serve(async (req) => {
             }
         }
 
-        // 5. Update streak
-        const lastActive = streak?.last_active_date;
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split("T")[0];
+        // 5. Update streak from completed app-day history so stale UTC-era rows self-correct.
+        const { data: completedDayRows } = await supabase
+            .from("user_quests")
+            .select("quest_date")
+            .eq("user_id", user.id)
+            .eq("is_completed", true)
+            .order("quest_date", { ascending: false })
+            .limit(120);
 
-        let newStreak = 1;
-        if (lastActive === yesterdayStr) {
-            newStreak = (streak?.current_streak ?? 0) + 1;
-        } else if (lastActive === today) {
-            newStreak = streak?.current_streak ?? 1;
+        const completedAppDays = new Set((completedDayRows ?? []).map((row: { quest_date: string }) => row.quest_date));
+
+        let newStreak = 0;
+        let cursorDay = today;
+        while (completedAppDays.has(cursorDay)) {
+            newStreak += 1;
+            cursorDay = getPreviousAppDayKey(cursorDay);
+        }
+
+        if (newStreak === 0) {
+            newStreak = 1;
         }
 
         const longestStreak = Math.max(newStreak, streak?.longest_streak ?? 0);

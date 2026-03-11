@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, MoreHorizontal, ShieldAlert, Trash2 } from 'lucide-react';
 import type { Habit } from '../lib/database.types';
+import {
+    BAD_HABIT_GOLD_LOSS,
+    BAD_HABIT_HP_LOSS,
+    getHabitSubtitle,
+    GOOD_HABIT_STAT_GAIN,
+    GOOD_HABIT_XP_REWARD,
+} from '../lib/habitGameplay';
 
 type HabitCardProps = {
     habit: Habit;
+    isLoggedToday?: boolean;
     isLogging?: boolean;
     onLog: (habit: Habit) => void | Promise<void>;
     onRemove: (habit: Habit) => void;
@@ -11,6 +19,7 @@ type HabitCardProps = {
 
 export default function HabitCard({
     habit,
+    isLoggedToday = false,
     isLogging = false,
     onLog,
     onRemove,
@@ -32,35 +41,49 @@ export default function HabitCard({
     }, [menuOpen]);
 
     const isGoodHabit = habit.is_good;
-    const actionClass = isGoodHabit
-        ? 'bg-slate-900 border-emerald-700/70 hover:border-emerald-400'
-        : 'bg-slate-900 border-red-700/70 hover:border-red-400';
+    const actionClass = isLoggedToday
+        ? isGoodHabit
+            ? 'bg-emerald-500 border-emerald-500'
+            : 'bg-red-500 border-red-500'
+        : isGoodHabit
+            ? 'bg-slate-900 border-slate-600 hover:border-emerald-400'
+            : 'bg-slate-900 border-slate-600 hover:border-red-400';
     const metaAccentClass = isGoodHabit ? 'text-emerald-400' : 'text-red-400';
-    const cardBorderClass = isGoodHabit ? 'border-slate-700' : 'border-red-900/40';
+    const cardBorderClass = isLoggedToday
+        ? isGoodHabit
+            ? 'border-emerald-800/60 bg-emerald-950/10'
+            : 'border-red-900/50 bg-red-950/10'
+        : isGoodHabit
+            ? 'border-slate-700'
+            : 'border-red-900/40';
     const tagClass = isGoodHabit
         ? 'border-emerald-900/40 bg-emerald-900/10 text-emerald-300'
         : 'border-red-900/40 bg-red-900/10 text-red-300';
+    const subtitle = getHabitSubtitle(habit, isLoggedToday);
 
     return (
         <div className={`relative flex items-start gap-3 rounded-lg border bg-slate-800 p-4 shadow-hud transition-all duration-300 ${cardBorderClass}`}>
             <button
                 onClick={() => void onLog(habit)}
-                disabled={isLogging}
+                disabled={isLogging || isLoggedToday}
                 className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 transition-all ${actionClass}`}
-                title={isGoodHabit ? 'Log habit' : 'Log slip'}
+                title={isLoggedToday ? 'Already logged today' : isGoodHabit ? 'Log habit' : 'Log slip'}
             >
                 {isLogging ? (
                     <div className="h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />
-                ) : (
-                    <Check className={`h-4 w-4 ${isGoodHabit ? 'text-emerald-400/85' : 'text-red-400/85'}`} />
-                )}
+                ) : isLoggedToday ? (
+                    <Check className="h-4 w-4 text-white" />
+                ) : null}
             </button>
 
             <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                        <p className="pr-2 text-sm font-medium leading-snug text-white">
+                        <p className={`pr-2 text-sm font-medium leading-snug ${isLoggedToday && isGoodHabit ? 'text-slate-400 line-through' : isLoggedToday ? 'text-red-100' : 'text-white'}`}>
                             {habit.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                            {subtitle}
                         </p>
                     </div>
                     <div ref={menuRef} className="relative shrink-0">
@@ -89,16 +112,21 @@ export default function HabitCard({
                     </div>
                 </div>
 
-                <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
+                <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                    <span className={`text-xs font-mono ${isGoodHabit ? 'text-amber-400' : 'text-red-400'}`}>
+                        {isGoodHabit ? `+${GOOD_HABIT_XP_REWARD} XP` : `-${BAD_HABIT_HP_LOSS} HP`}
+                    </span>
+                    {!isGoodHabit ? (
+                        <span className="text-xs font-mono text-red-300">
+                            -{BAD_HABIT_GOLD_LOSS} Gold
+                        </span>
+                    ) : null}
                     <span className={`inline-flex items-center gap-1 text-xs font-heading uppercase tracking-[0.16em] ${metaAccentClass}`}>
                         {isGoodHabit ? <Check className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
-                        {habit.stat_affected}
+                        {habit.is_good ? `+${GOOD_HABIT_STAT_GAIN} ${habit.stat_affected}` : habit.stat_affected}
                     </span>
                     <span className={`rounded-md border px-2 py-0.5 text-[10px] font-heading uppercase tracking-[0.16em] ${tagClass}`}>
                         {habit.frequency}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                        {isGoodHabit ? 'Track a positive routine.' : 'Track a slip / avoidable action.'}
                     </span>
                 </div>
             </div>

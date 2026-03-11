@@ -3,7 +3,7 @@
 **Product Name:** LifeRPG
 **Tagline:** Turn your life into a quest.
 
-> **Last Updated:** 2026-03-10
+> **Last Updated:** 2026-03-11
 
 ---
 
@@ -83,17 +83,30 @@ Tasks are converted into quests.
 - AI should generate a **small rotating pool**, not a wall of chores.
 - Only **3-5 daily quests** should be active/visible at a time; the rest of the current pool can rotate in on later days without requiring a fresh LLM call every day.
 - Daily quests should support **rerolling** into another option from the current hidden pool instead of using a punitive "skip" action.
+- The daily quest action menu should show how many rerolls remain in the **current daily pool**; if there are no alternates left, the menu should say so explicitly instead of implying a hidden quota.
+- Within a single generated weekly pool, daily quests must be **title-distinct and micro-action-distinct**; near-duplicate dailies (for example two versions of "Morning Stretch") are invalid.
+- Nightly rotation should prefer dailies that were **not visible the previous day** when the hidden pool has enough alternatives.
+- The generator should bias the daily pool toward **variety across stats/life areas**, and include at least one learning/knowledge-style daily when the user's dislikes and routine do not rule it out.
+- Daily/boss pool generation should receive a **recent behavior summary** covering at least the last 7 app days of completions, skipped quests with reasons, and recently generated daily titles so the LLM can build on what worked and avoid stale repetition.
+- The frontend should still dedupe legacy dirty daily rows by normalized title as a final UI safeguard, so repeated generated tasks never render twice in the visible list.
 - If the user completes at least **80%** of the currently active daily quests, the day should count as sufficiently cleared for overnight penalty purposes; leftover dailies should not trigger HP/streak punishment on their own.
+- Active **good daily habits** should count toward that same daily objective pool and the same 80% overnight clear rule, so habit-building advances the day instead of living in a disconnected tracker.
 - The active daily set should refresh on a **nightly 03:00** cadence, and the UI should show a countdown to that reset.
+- The same `03:00 -> 03:00` app-day boundary must drive **streak progression**, `quest_date`, daily reroll limits, and daily-habit completion checks; the system must not use raw UTC 24-hour windows for those mechanics.
+- Overnight settlement should not depend solely on a background cron existing in production. The app should also support an **authenticated idempotent settlement fallback** on first app open/return after reset, so HP penalties, streak breaks, and daily rotation still occur even if the scheduled trigger is delayed or missing.
 - On compact mobile HUD cards, the countdown should read as a centered three-line block: label, remaining time, then reset helper line.
 - The non-daily quest refresh quota should surface in quest action context (the `... more` menu / regenerate flow), not inside the top progress summary card.
 - Home and Quests should reuse the same daily-progress card component so the progress HUD, reset countdown, and daily-rule helper stay visually identical.
+- The `+` action beside **Today's Dailies** on Home should open the same custom quest forge modal used in Quests, not navigate away to another screen.
+- When forged from Home, the new quest should default to a **daily** quest and enter today's active visible daily flow immediately.
+- The shared daily-progress counter should keep its numeric fraction and wrapped label vertically centered together on narrow mobile widths.
 - The daily-penalty explanation should live behind a subtle helper action (for example, `What happens if I miss some?`) instead of sitting as always-visible warning text.
 - That helper should open as a centered overlay above the fixed bottom HUD so the modal never collides with navbar controls on mobile.
 
 **Side Quests** (Optional activities)
 - *Examples:* try a new recipe, walk outside, learn a micro skill, creative activity
 - *Reward:* small XP
+- Active side quests should also be **title-distinct**; duplicate optional quests such as multiple versions of `Explore a New Podcast` should never appear simultaneously.
 
 **Boss Quests** (Large challenges or milestones)
 - *Examples:* finish project, presentation, run 10k, publish article
@@ -108,6 +121,7 @@ Tasks are converted into quests.
 ### 4.4 Settings / Quest Setup
 - Life Rhythm and related quest-personalization inputs should not sit in an always-live editable state.
 - Settings should present the current quest setup in read-only form by default, with an explicit **Edit** action to change it.
+- In that read-only state, the saved **Current Life Rhythm** should render inside its own accented summary wrapper, visually aligned with the Likes / Dislikes / Focus summary cards.
 - The **Regenerate Quests** action should only enable when the quest-setup form is actually dirty.
 - Regenerating quests from Settings should preserve progression state: **XP, level, gold, streak, stats, achievements, and other earned progress must remain untouched**.
 - Settings-based regeneration should not implicitly force-regenerate milestone rewards.
@@ -189,6 +203,7 @@ Users define real-life rewards.
 ### 4.8 Habit Tracking System (Continuous Tasks)
 Separate from quests, users can define *Habits* that remain active day-to-day.
 - **Good habits:** (e.g., Drink water, Meditate) - Grants drip-feed XP every time it's clicked.
+- **Daily good habits count toward daily progress:** Logging a `daily` good habit should clear one daily objective for that day. The system should count each habit at most once per day toward the objective threshold, even if the player logs it multiple times.
 - **Bad habits:** (e.g., Avoid sugar, Limit screen time) - Visualized as standing strength, testing willpower over time.
 - **Frequencies:** Habits can be Daily, Weekly, or Monthly — each with its own tracking cadence.
 - **Quest → Habit Conversion:** Any AI-generated quest can be converted into a permanent habit with one click.
@@ -196,6 +211,9 @@ Separate from quests, users can define *Habits* that remain active day-to-day.
 - **Deletion Safety:** Removing a habit should require explicit confirmation because the inline remove affordance is intentionally compact on mobile.
 - Habit deletion confirmation should use an app-owned modal/dialog, not the browser's default confirm UI.
 - Habit cards should follow the same interaction language as quest cards: square primary action on the left, content in the middle, and secondary actions such as removal behind a compact action menu.
+- Habit cards should clearly show whether they have already been logged **today**, using a quest-like completed state instead of an ambiguous glowing action.
+- That completed-for-today signal should not be duplicated with an extra status pill if the checkbox/checkmark state already communicates it clearly.
+- Good habits should surface their fixed **XP reward** directly on the card, and the descriptive helper copy should sit under the title like quest-card subtitles.
 
 ### 4.9 Shop & Economy System
 Gold is earned through quests and boss battles. It can be spent in the Shop ("The Bazaar").
@@ -213,12 +231,14 @@ Gold is earned through quests and boss battles. It can be spent in the Shop ("Th
 - The active personalized offer set should stay diverse: only one active offer per category at a time.
 - Cost ranges from 100 to 1500 gold.
 - Quests should visibly award gold in the UI so the player understands how Bazaar spending is funded; the app should not hide the earn loop behind a top-right number alone.
+- Quest gold should respect a sensible minimum floor by **quest type + difficulty**, even for legacy/generated records that may carry stale low values.
 
 *Purpose:* Give the virtual economy weight so the "Death Penalty" (losing gold) feels impactful, while the dynamic offers provide tangible real-life motivation.
 
 ### 4.10 Custom Quests & Avoidance Goals
 Users can create custom AI-evaluated quests via free-text prompt.
 - **Custom Quests:** User describes what they want to do; AI evaluates difficulty, XP, and stat mapping.
+- The same forge modal should be reusable from both Quests and Home, with Home defaulting to `daily` creation.
 - **Avoidance Goals:** Negative-framed quests (e.g., "Don't smoke today", "Spend less than 2 hours on Instagram") that test willpower.
 
 ---
@@ -387,3 +407,12 @@ The core user loop:
 - **2026-03-10 - App-Owned Confirmation UI:** Destructive confirmations in the main HUD flow now use in-app dialogs instead of browser-native confirm popups so typography, colors, button hierarchy, and overlay behavior stay consistent with the rest of LifeRPG.
 - **2026-03-10 - Habit Cards Follow Quest Affordances:** Habit tracking cards now mirror the quest-card interaction model instead of inventing a separate one. Logging uses a square left-side action control, while deletion moved into a cleaner secondary action menu so the card no longer ends with an ambiguous floating `X` and neon `+/-` button pairing.
 - **2026-03-10 - Quest Gold Loop Visibility:** The quest economy now treats gold as a first-class reward instead of hidden metadata. Generated quests across daily/side/boss flows receive meaningful gold values, older zero-gold quests still pay via completion fallback logic, quest cards show gold beside XP, and Bazaar copy explicitly frames gold as a quest-earned currency to spend.
+- **2026-03-10 - Unified Daily Objective Loop:** Dashboard and Quests now treat active daily quests plus active good daily habits as one shared objective pool. Progress comes from the cached quest-runtime snapshot, each daily habit can contribute at most once per day, and nightly HP penalties evaluate the exact same 80% rule server-side.
+- **2026-03-10 - Daily Reroll Pool Messaging:** Daily rerolls are now exposed as pool availability rather than an ambiguous hidden quota. The shared quest action menu shows the remaining alternate dailies in the current pool and disables reroll with explicit copy when no alternates remain.
+- **2026-03-11 - Daily Progress Counter Alignment:** The shared daily-progress HUD now centers the `x/y` fraction and its wrapped descriptor as one aligned unit, avoiding the awkward top-heavy counter/text relationship on small mobile widths.
+- **2026-03-11 - Quest Setup Summary Visual Parity:** The read-only Settings summary now gives `Current Life Rhythm` the same card-family treatment as Likes / Dislikes / Focus, using an amber-accented wrapper instead of leaving the main routine text visually floating on the parent panel.
+- **2026-03-11 - Legacy Quest Gold Minimums:** Quest gold rewards now clamp upward to the current type+difficulty baseline instead of blindly trusting stale low stored values. This keeps older hard bosses and similar content economically aligned with the Bazaar loop without requiring manual cleanup first.
+- **2026-03-11 - Habit Completion Signal Simplification:** Habit cards now trust the left checkbox/checkmark as the primary “done today” signal and drop the extra status pill, reducing repeated state labels without losing clarity.
+- **2026-03-11 - App-Day Boundary Ownership:** Streaks, `quest_date`, daily reroll limits, countdown anchoring, and daily-habit progress now all derive from one shared `03:00 -> 03:00` app-day key instead of mixing UTC day splits with local UI assumptions. This keeps streak progression coherent across quest completion, nightly penalties, and daily HUD reads.
+- **2026-03-11 - Recent Behavior Prompt Memory:** Quest-generation prompts now include a short summary of the last 7 app days: completed quests, skipped quests with reasons, successful stat lanes, and recently generated daily titles. This gives the LLM enough behavioral memory to vary pools instead of repeating stale daily patterns.
+- **2026-03-11 - Authenticated Daily Settlement Fallback:** Nightly HP/streak settlement and daily-pool rotation no longer depend only on a server cron. The app can now trigger an idempotent per-user settlement on authenticated entry/visibility return, keyed by `last_daily_settlement_day`, so missed schedules do not silently suppress penalties or daily refreshes.

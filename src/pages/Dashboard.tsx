@@ -1,12 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { completeQuest, convertToHabit, rerollDailyQuest, type CompleteQuestResponse } from '../lib/api';
 import type { Quest, Streak } from '../lib/database.types';
 import { fetchQuestRuntime } from '../lib/questRuntime';
 import {
-    getDailyQuestProgress,
+    getDailyObjectiveProgress,
     getVisibleDailyQuests,
     xpRequiredForLevel,
 } from '../lib/gameplay';
@@ -15,10 +14,10 @@ import { Flame, Coins, Sparkles, Heart, Plus } from 'lucide-react';
 import DailyProgressCard from '../components/DailyProgressCard';
 import Habits from '../components/Habits';
 import QuestCard from '../components/QuestCard';
-import { emitHabitCreated } from '../lib/habitEvents';
+import CustomQuestModal from '../components/CustomQuestModal';
+import { APP_RUNTIME_CHANGED_EVENT, emitHabitCreated, HABIT_RUNTIME_CHANGED_EVENT } from '../lib/habitEvents';
 
 export default function Dashboard() {
-    const navigate = useNavigate();
     const { user, profile, refreshProfile } = useAuth();
     const [quests, setQuests] = useState<Quest[]>([]);
     const [completedQuestIds, setCompletedQuestIds] = useState<Set<string>>(new Set());
@@ -29,6 +28,10 @@ export default function Dashboard() {
     const [loadingId, setLoadingId] = useState<string | null>(null);
     const [actionId, setActionId] = useState<string | null>(null);
     const [rerollingId, setRerollingId] = useState<string | null>(null);
+    const [remainingDailyRerolls, setRemainingDailyRerolls] = useState(0);
+    const [activeDailyHabitIds, setActiveDailyHabitIds] = useState<string[]>([]);
+    const [loggedDailyHabitIds, setLoggedDailyHabitIds] = useState<string[]>([]);
+    const [customModalOpen, setCustomModalOpen] = useState(false);
 
     const fetchData = useCallback(async (options?: { force?: boolean }) => {
         if (!user) return;
@@ -36,6 +39,9 @@ export default function Dashboard() {
         const questRuntime = await fetchQuestRuntime(user.id, { force: options?.force });
         setQuests(questRuntime.quests);
         setCompletedQuestIds(new Set(questRuntime.completedQuestIds));
+        setRemainingDailyRerolls(questRuntime.remainingDailyRerolls);
+        setActiveDailyHabitIds(questRuntime.activeDailyHabitIds);
+        setLoggedDailyHabitIds(questRuntime.loggedDailyHabitIds);
 
         const streakCacheKey = getDashboardStreakCacheKey(user.id);
         if (!options?.force) {
@@ -59,6 +65,19 @@ export default function Dashboard() {
 
     useEffect(() => {
         fetchData();
+    }, [fetchData]);
+
+    useEffect(() => {
+        const handleHabitRuntimeChanged = () => {
+            fetchData({ force: true });
+        };
+
+        window.addEventListener(HABIT_RUNTIME_CHANGED_EVENT, handleHabitRuntimeChanged);
+        window.addEventListener(APP_RUNTIME_CHANGED_EVENT, handleHabitRuntimeChanged);
+        return () => {
+            window.removeEventListener(HABIT_RUNTIME_CHANGED_EVENT, handleHabitRuntimeChanged);
+            window.removeEventListener(APP_RUNTIME_CHANGED_EVENT, handleHabitRuntimeChanged);
+        };
     }, [fetchData]);
 
     const handleCompleteQuest = async (quest: Quest) => {
@@ -131,6 +150,7 @@ export default function Dashboard() {
             });
 
             showToast(result.message || 'Daily quest rerolled.');
+            await fetchData({ force: true });
         } catch (error: any) {
             setActionToast({ msg: error.message || 'Failed to reroll daily quest', type: 'error' });
             setTimeout(() => setActionToast(null), 3000);
@@ -145,7 +165,12 @@ export default function Dashboard() {
     };
 
     const visibleDailyQuests = getVisibleDailyQuests(quests);
-    const dailyProgress = getDailyQuestProgress(visibleDailyQuests, completedQuestIds);
+    const dailyProgress = getDailyObjectiveProgress(
+        visibleDailyQuests,
+        completedQuestIds,
+        activeDailyHabitIds,
+        loggedDailyHabitIds,
+    );
 
     const currentXP = profile?.xp ?? 0;
     const currentLevel = profile?.level ?? 1;
@@ -255,9 +280,9 @@ export default function Dashboard() {
                                 <p className="text-xs text-slate-500">Only the active focus set lives here. More rotate in later.</p>
                             </div>
                             <button
-                                onClick={() => navigate('/quests')}
+                                onClick={() => setCustomModalOpen(true)}
                                 className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
-                                title="Open full quest screen"
+                                title="Forge a daily quest"
                             >
                                 <Plus className="w-4 h-4" />
                             </button>
@@ -273,6 +298,7 @@ export default function Dashboard() {
                                     onComplete={handleCompleteQuest}
                                     onMakeHabit={handleMakeHabit}
                                     onRerollDaily={handleRerollDaily}
+                                    remainingDailyRerolls={remainingDailyRerolls}
                                     disableActions={!!loadingId || !!actionId || !!rerollingId}
                                 />
                             ))}
@@ -290,6 +316,23 @@ export default function Dashboard() {
                     </div>
                 )}
             </div>
+
+            <CustomQuestModal
+                open={customModalOpen}
+                questType="daily"
+                onClose={() => setCustomModalOpen(false)}
+                onCreated={async (quest) => {
+                    setQuests((prev) => [...prev, quest].sort((a, b) =>
+                        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                    ));
+                    showToast(`Custom quest created: ${quest.title}`);
+                    await fetchData({ force: true });
+                }}
+                onError={(message) => {
+                    console.error(message);
+                    showToast(message, 'error');
+                }}
+            />
         </div>
     );
 }

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './pages/Auth';
@@ -9,6 +10,7 @@ import Achievements from './pages/Achievements';
 import Settings from './pages/Settings';
 import Shop from './pages/Shop';
 import BottomNav from './components/BottomNav';
+import { settleDailyIfNeeded } from './lib/api';
 import { hasCompletedOnboarding } from './lib/onboarding';
 
 // ProtectedRoute: Redirect to /auth if not logged in
@@ -112,6 +114,39 @@ function AppRoutes() {
 }
 
 function ProtectedNavLayout() {
+  const { user, refreshProfile } = useAuth();
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    const runSettlement = async () => {
+      try {
+        const result = await settleDailyIfNeeded();
+        if (!cancelled && result.settled) {
+          await refreshProfile();
+        }
+      } catch (error) {
+        console.error('Daily settlement failed:', error);
+      }
+    };
+
+    void runSettlement();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void runSettlement();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user?.id]);
+
   return (
     <ProtectedRoute>
       <div className="flex-1 min-h-0 flex flex-col">

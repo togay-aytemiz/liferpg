@@ -13,6 +13,7 @@ type QuestCardProps = {
     onRerollDaily?: (quest: Quest) => void | Promise<void>;
     onRegenerate?: (quest: Quest) => void;
     remainingRegenerations?: number | null;
+    remainingDailyRerolls?: number | null;
     disableActions?: boolean;
 };
 
@@ -26,6 +27,7 @@ export default function QuestCard({
     onRerollDaily,
     onRegenerate,
     remainingRegenerations,
+    remainingDailyRerolls,
     disableActions = false,
 }: QuestCardProps) {
     const [menuOpen, setMenuOpen] = useState(false);
@@ -56,6 +58,7 @@ export default function QuestCard({
     const canRegenerate = !!onRegenerate && quest.quest_type !== 'daily';
     const hasMenuActions = canMakeHabit || canRerollDaily || canRegenerate;
     const regenerateDisabled = typeof remainingRegenerations === 'number' && remainingRegenerations <= 0;
+    const rerollDisabled = typeof remainingDailyRerolls === 'number' && remainingDailyRerolls <= 0;
     const goldReward = getQuestGoldReward(quest.quest_type, quest.difficulty, quest.gold_reward);
 
     return (
@@ -148,14 +151,21 @@ export default function QuestCard({
                                         setMenuOpen(false);
                                         void onRerollDaily?.(quest);
                                     }}
-                                    disabled={disableActions || isActionLoading}
-                                    className="flex w-full flex-col items-start rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-800"
+                                    disabled={disableActions || isActionLoading || rerollDisabled}
+                                    className="flex w-full flex-col items-start rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     <span className="inline-flex items-center gap-2 text-sm text-slate-200">
                                         {isActionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" /> : null}
                                         Reroll Daily
                                     </span>
                                     <span className="text-[11px] text-slate-500">Swap this slot with another daily from the current pool.</span>
+                                    <span className="mt-1 text-[11px] text-slate-500">
+                                        {typeof remainingDailyRerolls === 'number'
+                                            ? remainingDailyRerolls > 0
+                                                ? `${remainingDailyRerolls} rerolls left in today's pool`
+                                                : `No rerolls left in today's pool`
+                                            : 'Checking rerolls left...'}
+                                    </span>
                                 </button>
                             )}
 

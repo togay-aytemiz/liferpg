@@ -15,6 +15,7 @@ export const STATIC_VIEW_CACHE_TTL_MS = 90_000;
 export const getQuestRuntimeCacheKey = (userId: string) => `quest-runtime:${userId}`;
 export const getDashboardStreakCacheKey = (userId: string) => `dashboard-streak:${userId}`;
 export const getHabitsCacheKey = (userId: string) => `habits:${userId}`;
+export const getHabitsTodayLogCacheKey = (userId: string) => `habits-today:${userId}`;
 export const getShopCacheKey = (userId: string) => `shop:${userId}`;
 export const getAwardsCacheKey = (userId: string) => `awards:${userId}`;
 

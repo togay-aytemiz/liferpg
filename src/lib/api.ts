@@ -3,6 +3,7 @@
 
 import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
 import type { Habit, Quest, ShopItem } from './database.types';
+import { getAppDayKey } from './appDay';
 import { invalidateQuestRuntime } from './questRuntime';
 import {
     getAwardsCacheKey,
@@ -11,6 +12,7 @@ import {
     getShopCacheKey,
     invalidateCachedValue,
 } from './viewCache';
+import { emitAppRuntimeChanged, emitHabitRuntimeChanged } from './habitEvents';
 
 interface GenerateQuestsResponse {
     success: boolean;
@@ -32,6 +34,7 @@ interface ParsedEdgeResponse {
 }
 
 const EDGE_FUNCTIONS_BASE_URL = `${supabaseUrl.replace(/\/$/, '')}/functions/v1`;
+const dailySettlementInflight = new Map<string, Promise<DailySettlementResponse>>();
 
 function isUnauthorizedStatus(status: number, message: string | null): boolean {
     if (status === 401) return true;
@@ -217,6 +220,17 @@ export interface CompleteQuestResponse {
     chain_unlocked: string | null;
 }
 
+export interface DailySettlementResponse {
+    success: boolean;
+    settled: boolean;
+    current_app_day: string;
+    previous_app_day: string;
+    hp_penalty: number;
+    freeze_consumed: boolean;
+    streak_reset: boolean;
+    rotated_daily_pool: boolean;
+}
+
 /**
  * Call the complete-quest Edge Function.
  * Handles XP award, level up, stat increase, streak, and achievements.
@@ -237,6 +251,35 @@ export async function completeQuest(questId: string): Promise<CompleteQuestRespo
     }
 
     return response;
+}
+
+export async function settleDailyIfNeeded(): Promise<DailySettlementResponse> {
+    const { user } = await getValidUser();
+    const cacheKey = `${user.id}:${getAppDayKey()}`;
+    const existing = dailySettlementInflight.get(cacheKey);
+    if (existing) {
+        return existing;
+    }
+
+    const request = invokeEdgeFunction<DailySettlementResponse>(
+        'settle-daily',
+        {},
+        'Failed to settle daily state',
+    ).then((response) => {
+        if (response.settled) {
+            invalidateQuestRuntime(user.id);
+            invalidateCachedValue(getDashboardStreakCacheKey(user.id));
+            invalidateCachedValue(getShopCacheKey(user.id));
+            emitAppRuntimeChanged();
+        }
+
+        return response;
+    }).finally(() => {
+        dailySettlementInflight.delete(cacheKey);
+    });
+
+    dailySettlementInflight.set(cacheKey, request);
+    return request;
 }
 
 /**
@@ -358,6 +401,8 @@ export async function logHabit(habitId: string): Promise<any> {
     invalidateCachedValue(getAwardsCacheKey(session.user.id));
     invalidateCachedValue(getShopCacheKey(session.user.id));
     invalidateCachedValue(getDashboardStreakCacheKey(session.user.id));
+    invalidateQuestRuntime(session.user.id);
+    emitHabitRuntimeChanged();
 
     return data;
 }
@@ -399,6 +444,8 @@ export async function convertToHabit(questTitle: string, statAffected?: string |
     }
 
     invalidateCachedValue(getHabitsCacheKey(session.user.id));
+    invalidateQuestRuntime(session.user.id);
+    emitHabitRuntimeChanged();
     return insertedHabit as Habit;
 }
 

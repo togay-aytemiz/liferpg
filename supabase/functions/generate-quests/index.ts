@@ -13,9 +13,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callOpenAI, validateQuestResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { buildRecentQuestBehaviorContext } from "../_shared/recentQuestBehavior.ts";
+import { dedupeDailyPool, dedupeQuestPoolByTitle, getLatestQuestBatch } from "../../../src/lib/dailyPool.ts";
 import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
 
-const RECENT_BATCH_WINDOW_MS = 60_000;
 const MIN_GENERATED_BATCH_SIZE = 7;
 const PROFILE_SYNC_GRACE_MS = 2_000;
 const DAILY_POOL_LIMIT = 7;
@@ -81,7 +82,11 @@ You MUST return valid JSON with this exact structure:
 Rules:
 - Generate 5-7 daily quests as a SMALL weekly pool based on the user's routine
 - The first daily quests in the array should be the best fit for TODAY; later ones should feel like alternate dailies for the next few days
+- Daily quests MUST be distinct from each other. Do not return duplicate or near-duplicate micro-actions in the same weekly pool
+- Spread the daily pool across multiple life areas/stats when the user's routine allows it
+- If it does not conflict with dislikes or the described routine, include at least one knowledge-oriented daily (reading, studying, learning, language practice, etc.)
 - Generate 1-2 fun side quests for variety
+- Side quests MUST also be distinct from each other. Do not return duplicate or near-duplicate optional quests
 - Generate 1 boss quest as a weekly challenge
 - Generate 2-3 chain_quests that form a QUEST CHAIN with the boss quest:
   - Each chain quest is a progressively harder continuation of the boss quest
@@ -102,7 +107,8 @@ Rules:
 - Quest titles should be concise and action-oriented (like RPG quest names)
 - XP rewards should match difficulty
 - Keep the tone motivating and RPG-themed
-- IMPORTANT CONTEXT AVOIDANCE: If the user provides 'active_habits', DO NOT generate Daily or Side quests that perfectly match these existing habits. Generate complementary or entirely new quests instead.`;
+- IMPORTANT CONTEXT AVOIDANCE: If the user provides 'active_habits', DO NOT generate Daily or Side quests that perfectly match these existing habits. Generate complementary or entirely new quests instead.
+- IMPORTANT RECENT MEMORY: If the prompt includes recent app-day behavior, treat it as a hard anti-repetition signal. Avoid recently skipped/disliked patterns, and avoid reusing the same daily titles from the recent generated history unless there is no stronger alternative.`;
 
 serve(async (req) => {
     // Handle CORS preflight
@@ -168,11 +174,7 @@ serve(async (req) => {
             console.warn("Failed to read latest AI quests before generation:", latestAiQuestsError.message);
         } else if ((latestAiQuests?.length ?? 0) > 0) {
             const newestCreatedAt = new Date(latestAiQuests![0].created_at).getTime();
-            const recentBatch = latestAiQuests!
-                .filter((quest) => {
-                    const createdAt = new Date(quest.created_at).getTime();
-                    return Number.isFinite(createdAt) && Math.abs(newestCreatedAt - createdAt) <= RECENT_BATCH_WINDOW_MS;
-                })
+            const recentBatch = getLatestQuestBatch(latestAiQuests!)
                 .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
             const batchMatchesCurrentProfile = newestCreatedAt >= (profileUpdatedAtMs - PROFILE_SYNC_GRACE_MS);
@@ -190,7 +192,7 @@ serve(async (req) => {
                         success: true,
                         quests: recentBatch,
                         summary: {
-                            daily: recentBatch.filter((quest) => quest.quest_type === "daily").length,
+                            daily: dedupeDailyPool(recentBatch.filter((quest) => quest.quest_type === "daily")).length,
                             side: recentBatch.filter((quest) => quest.quest_type === "side").length,
                             boss: bossCount,
                             chain: chainCount,
@@ -229,11 +231,13 @@ serve(async (req) => {
                 .join(", ")}`
             : "";
 
+        const { context: recentBehaviorContext } = await buildRecentQuestBehaviorContext(supabase as any, user.id, { appDays: 7 });
+
         // Call OpenAI to generate quests
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${habitsContext}\n\nPlease generate quests highly tailored to this routine, my focus areas, and my likes. Strictly AVOID what I hate! Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).` },
+                { role: "user", content: `Here is my daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${habitsContext}${recentBehaviorContext}\n\nPlease generate quests highly tailored to this routine, my focus areas, my likes, and my recent real behavior. Strictly AVOID what I hate, what I recently skipped, and stale repetitions of the same daily titles. Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).` },
             ],
             {
                 model: "gpt-4o-mini",
@@ -245,9 +249,9 @@ serve(async (req) => {
 
         // Parse and VALIDATE the AI-generated quests (whitelists fields)
         const generatedQuests = validateQuestResponse(aiResponse);
-        const dailyQuestPool = generatedQuests.daily_quests.slice(0, DAILY_POOL_LIMIT);
+        const dailyQuestPool = dedupeDailyPool(generatedQuests.daily_quests).slice(0, DAILY_POOL_LIMIT);
         const activeDailyCount = getActiveDailyLimit(dailyQuestPool.length);
-        const sideQuests = generatedQuests.side_quests.slice(0, SIDE_QUEST_LIMIT);
+        const sideQuests = dedupeQuestPoolByTitle(generatedQuests.side_quests).slice(0, SIDE_QUEST_LIMIT);
 
         // Generate a chain_id for boss + chain quests
         const chainId = crypto.randomUUID();
@@ -344,8 +348,8 @@ serve(async (req) => {
                 success: true,
                 quests: insertedQuests,
                 summary: {
-                    daily: generatedQuests.daily_quests.length,
-                    side: generatedQuests.side_quests.length,
+                    daily: dailyQuestPool.length,
+                    side: sideQuests.length,
                     boss: 1,
                     chain: chainQuests.length,
                 },

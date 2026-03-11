@@ -174,9 +174,9 @@ export default function Settings() {
                     </p>
                     {!isEditingQuestSetup ? (
                         <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-800/70 p-4 shadow-inner-panel">
-                            <div>
-                                <p className="text-[0.7rem] font-heading tracking-[0.22em] text-slate-500 uppercase">Current Life Rhythm</p>
-                                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-200">
+                            <div className="rounded-lg border border-amber-900/40 bg-amber-950/10 p-3 shadow-inner-panel">
+                                <p className="text-[0.7rem] font-heading tracking-[0.22em] text-amber-300 uppercase">Current Life Rhythm</p>
+                                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-100">
                                     {profile?.life_rhythm || 'No life rhythm saved yet.'}
                                 </p>
                             </div>

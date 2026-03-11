@@ -33,3 +33,7 @@ verify_jwt = false
 [functions.skip-quest]
 enabled = true
 verify_jwt = false
+
+[functions.settle-daily]
+enabled = true
+verify_jwt = false

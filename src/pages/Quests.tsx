@@ -1,17 +1,19 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import type { Quest } from '../lib/database.types';
-import { completeQuest, regenerateQuest, rerollDailyQuest, createCustomQuest, convertToHabit } from '../lib/api';
+import { completeQuest, regenerateQuest, rerollDailyQuest, convertToHabit } from '../lib/api';
 import {
-    getDailyQuestProgress,
+    getDailyObjectiveProgress,
     getVisibleDailyQuests,
     getVisibleWeeklyBoss,
 } from '../lib/gameplay';
-import { Shield, Swords, Skull, Plus, RefreshCw } from 'lucide-react';
+import { dedupeQuestPoolByTitle } from '../lib/dailyPool';
+import { Shield, Swords, Skull, Plus } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import DailyProgressCard from '../components/DailyProgressCard';
 import QuestCard from '../components/QuestCard';
-import { emitHabitCreated } from '../lib/habitEvents';
+import CustomQuestModal from '../components/CustomQuestModal';
+import { APP_RUNTIME_CHANGED_EVENT, emitHabitCreated, HABIT_RUNTIME_CHANGED_EVENT } from '../lib/habitEvents';
 import { fetchQuestRuntime } from '../lib/questRuntime';
 
 export default function Quests() {
@@ -27,10 +29,11 @@ export default function Quests() {
     const [tab, setTab] = useState<'daily' | 'side' | 'boss'>('daily');
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
     const [remainingRegenerations, setRemainingRegenerations] = useState(0);
+    const [remainingDailyRerolls, setRemainingDailyRerolls] = useState(0);
+    const [activeDailyHabitIds, setActiveDailyHabitIds] = useState<string[]>([]);
+    const [loggedDailyHabitIds, setLoggedDailyHabitIds] = useState<string[]>([]);
 
     const [customModalOpen, setCustomModalOpen] = useState(false);
-    const [customPrompt, setCustomPrompt] = useState('');
-    const [isCreatingCustom, setIsCreatingCustom] = useState(false);
 
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
         setToast({ msg, type });
@@ -45,10 +48,26 @@ export default function Quests() {
         setCompletedIds(new Set(snapshot.completedQuestIds));
         setCompletedBossIds(new Set(snapshot.completedBossIds));
         setRemainingRegenerations(snapshot.remainingRegenerations);
+        setRemainingDailyRerolls(snapshot.remainingDailyRerolls);
+        setActiveDailyHabitIds(snapshot.activeDailyHabitIds);
+        setLoggedDailyHabitIds(snapshot.loggedDailyHabitIds);
     }, [user]);
 
     useEffect(() => {
         fetchQuests();
+    }, [fetchQuests]);
+
+    useEffect(() => {
+        const handleHabitRuntimeChanged = () => {
+            fetchQuests({ force: true });
+        };
+
+        window.addEventListener(HABIT_RUNTIME_CHANGED_EVENT, handleHabitRuntimeChanged);
+        window.addEventListener(APP_RUNTIME_CHANGED_EVENT, handleHabitRuntimeChanged);
+        return () => {
+            window.removeEventListener(HABIT_RUNTIME_CHANGED_EVENT, handleHabitRuntimeChanged);
+            window.removeEventListener(APP_RUNTIME_CHANGED_EVENT, handleHabitRuntimeChanged);
+        };
     }, [fetchQuests]);
 
     const handleComplete = async (quest: Quest) => {
@@ -97,6 +116,7 @@ export default function Quests() {
             });
 
             showToast(result.message || 'Daily quest rerolled.');
+            await fetchQuests({ force: true });
         } catch (err: any) {
             console.error(err);
             showToast(err.message || 'Failed to reroll daily quest', 'error');
@@ -142,30 +162,6 @@ export default function Quests() {
         }
     };
 
-    const handleCreateCustom = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!customPrompt.trim() || isCreatingCustom) return;
-
-        setIsCreatingCustom(true);
-        try {
-            const targetType = tab === 'boss' ? 'side' : tab;
-            const result = await createCustomQuest(customPrompt, targetType);
-
-            setQuests((prev) => [...prev, result.quest].sort((a, b) =>
-                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-            ));
-
-            showToast(`Custom quest created: ${result.quest.title}`);
-            setCustomModalOpen(false);
-            setCustomPrompt('');
-        } catch (err: any) {
-            console.error(err);
-            showToast(err.message || 'Failed to create quest', 'error');
-        } finally {
-            setIsCreatingCustom(false);
-        }
-    };
-
     const handleMakeHabit = async (quest: Quest) => {
         try {
             setHabitActionId(quest.id);
@@ -181,8 +177,16 @@ export default function Quests() {
 
     const visibleDailyQuests = getVisibleDailyQuests(quests);
     const visibleWeeklyBoss = getVisibleWeeklyBoss(quests, completedBossIds);
-    const sideQuests = quests.filter((quest) => quest.quest_type === 'side');
-    const dailyProgress = getDailyQuestProgress(visibleDailyQuests, completedIds);
+    const sideQuests = dedupeQuestPoolByTitle(
+        quests.filter((quest) => quest.quest_type === 'side'),
+        { preferActive: true },
+    );
+    const dailyProgress = getDailyObjectiveProgress(
+        visibleDailyQuests,
+        completedIds,
+        activeDailyHabitIds,
+        loggedDailyHabitIds,
+    );
 
     const displayedQuests = tab === 'daily'
         ? visibleDailyQuests
@@ -257,6 +261,7 @@ export default function Quests() {
                         onComplete={handleComplete}
                         onMakeHabit={handleMakeHabit}
                         onRerollDaily={quest.quest_type === 'daily' ? handleRerollDaily : undefined}
+                        remainingDailyRerolls={quest.quest_type === 'daily' ? remainingDailyRerolls : null}
                         onRegenerate={quest.quest_type !== 'daily' ? handleOpenRegenerate : undefined}
                         remainingRegenerations={quest.quest_type !== 'daily' ? remainingRegenerations : null}
                         disableActions={!!loadingId || !!regeneratingId || !!rerollingId || !!habitActionId}
@@ -296,40 +301,22 @@ export default function Quests() {
             )}
 
             {customModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 animate-in fade-in duration-200">
-                    <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-sm w-full p-5 shadow-xl animate-in fade-in zoom-in-95 duration-200">
-                        <h3 className="font-heading text-lg text-white mb-2">Create Custom Quest</h3>
-                        <p className="text-slate-400 text-sm mb-4">
-                            Write the challenge you want to add.
-                        </p>
-
-                        <form onSubmit={handleCreateCustom} className="space-y-4">
-                            <textarea
-                                value={customPrompt}
-                                onChange={(event) => setCustomPrompt(event.target.value)}
-                                placeholder='e.g. "No fast food today" or "Finish my presentation outline"'
-                                className="w-full min-h-[120px] rounded-lg border border-slate-700 bg-slate-800 px-3 py-3 text-sm text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-                            />
-
-                            <div className="flex gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setCustomModalOpen(false)}
-                                    className="flex-1 rounded-lg bg-slate-800 px-4 py-2.5 text-sm text-slate-300 transition-colors hover:bg-slate-700"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={!customPrompt.trim() || isCreatingCustom}
-                                    className="flex-1 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-heading text-slate-900 transition-colors hover:bg-amber-400 disabled:bg-slate-700 disabled:text-slate-500"
-                                >
-                                    {isCreatingCustom ? <RefreshCw className="mx-auto w-4 h-4 animate-spin" /> : 'Forge Quest'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                <CustomQuestModal
+                    open={customModalOpen}
+                    questType={tab === 'boss' ? 'side' : tab}
+                    onClose={() => setCustomModalOpen(false)}
+                    onCreated={async (quest) => {
+                        setQuests((prev) => [...prev, quest].sort((a, b) =>
+                            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                        ));
+                        showToast(`Custom quest created: ${quest.title}`);
+                        await fetchQuests({ force: true });
+                    }}
+                    onError={(message) => {
+                        console.error(message);
+                        showToast(message, 'error');
+                    }}
+                />
             )}
         </div>
     );

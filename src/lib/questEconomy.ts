@@ -26,9 +26,11 @@ export function getQuestGoldReward(
     difficulty: QuestDifficulty,
     existingGoldReward?: number | null
 ): number {
+    const baseline = GOLD_BY_TYPE_AND_DIFFICULTY[questType]?.[difficulty] ?? 0;
+
     if (typeof existingGoldReward === 'number' && existingGoldReward > 0) {
-        return existingGoldReward;
+        return Math.max(existingGoldReward, baseline);
     }
 
-    return GOLD_BY_TYPE_AND_DIFFICULTY[questType]?.[difficulty] ?? 0;
+    return baseline;
 }

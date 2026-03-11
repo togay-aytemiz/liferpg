@@ -48,6 +48,8 @@ All notable changes to this project will be documented in this file.
 - Moved protected Edge Functions off gateway-level JWT verification and onto explicit in-function auth checks to eliminate false `Invalid JWT` gateway failures.
 - Unified custom quest generation with the shared OpenAI helper + sanitization path for consistent retry/error behavior.
 - Shifted AI quest generation from an always-visible chore wall to a **small rotating daily pool**: generation now keeps only 3-5 daily quests active at once, side quests tighter, and `daily-cron` rotates the active daily subset over time without a fresh LLM call.
+- Tightened daily-pool generation and rotation so visible dailies stay title-distinct, lean toward broader stat variety, and prefer not to repeat yesterday's same cards when the hidden pool has alternatives.
+- Tightened side-quest generation so optional quests are title-distinct as well, instead of allowing multiple near-identical side cards in the same active set.
 - Updated quest visibility so the Quests screen shows only currently active quests; future boss-chain chapters stay off-screen until unlocked.
 - Reworked the main character HUD so streak and gold sit beside the level label, and the XP bar now reflects true within-level progress.
 - Converted the protected-screen bottom navbar into a fixed safe-area HUD so navigation stays anchored while content scrolls.
@@ -57,10 +59,21 @@ All notable changes to this project will be documented in this file.
 - Simplified Home to the core gameplay loop: hero HUD, today's dailies, progress summary, reset countdown, and habits. Weekly boss, side quests, stats, and milestone rewards no longer clutter the home feed.
 - Unified Dashboard and Quests around one shared quest-card design with a `... more` action menu for habits and reroll/regeneration flows.
 - Added explicit daily-reset countdown messaging targeting nightly `03:00`, plus progress counters for today's quest completion in both Home and Quests.
+- Unified the daily progress loop so active good daily habits count alongside active daily quests in the shared HUD card and overnight success calculation.
 - Reworked Settings so quest inputs live behind an explicit edit action, and quest regeneration only enables when those inputs are actually changed.
 - Standardized protected-page headers onto one shared sticky treatment so Quests, Bazaar, Character, and Settings now read as one cohesive navigation system.
 - Unified Home and Quests around one shared daily-progress HUD card, with a centered three-line reset countdown and a lightweight daily-rule helper instead of persistent warning text.
+- Reused the custom quest forge modal across Home and Quests, and changed Home's Today's Dailies `+` action to forge in place instead of bouncing the player to the quest tab.
 - Clarified the gold economy loop: quests now surface gold rewards next to XP, completion toasts mention gold earned, and Bazaar explicitly tells the player to spend quest gold there.
+- Reworked habit cards to mirror quest-card hierarchy: today's logged state is clearer, helper copy now sits beneath the title, and visible XP/penalty metadata is shown inline.
+- Daily quest action menus now show the remaining rerolls in the current pool and clearly say when no alternate dailies are left.
+- The shared daily-progress card now vertically centers its numeric fraction and wrapped descriptor text for cleaner mobile alignment.
+- The read-only Settings summary now wraps `Current Life Rhythm` in its own amber-accented panel so it matches the surrounding preference summary cards.
+- Quest gold rewards now respect a type+difficulty minimum, so old hard bosses no longer surface obviously too-low values such as `+5 Gold`.
+- Habit cards no longer show a second `Done Today` pill when the completion checkbox already indicates that state.
+- Daily streak and daily-objective reads now share one `03:00 -> 03:00` app-day helper across frontend HUDs and backend functions instead of mixing UTC calendar days with local reset messaging.
+- Quest generation now includes a 7-app-day behavior memory summary (recent completions, skipped quests with reasons, successful stat lanes, and recent generated daily titles) so the LLM can produce more novel daily pools.
+- Added an authenticated per-user daily-settlement fallback on app entry/visibility return, keyed by `last_daily_settlement_day`, so overnight penalties and daily rotation still happen even if the background cron is delayed or missing.
 
 ### Fixed
 - **Auth Refresh Spinner Lock:** Fixed an auth bootstrap edge case where refreshing `/auth` or `/onboarding` could leave the app stuck in a perpetual spinner. `AuthContext` now avoids async work directly inside Supabase auth callbacks and applies timeout guards during initial session/profile hydration.
@@ -93,4 +106,17 @@ All notable changes to this project will be documented in this file.
 - **Daily Rule Modal vs. Fixed HUD:** Fixed the daily-rule helper modal opening too low and colliding with the fixed bottom navbar; it now opens centered above the HUD with its own overlay layer.
 - **Browser Habit Confirm Popup:** Fixed habit deletion relying on the browser's native confirm dialog; it now uses an in-app confirmation modal with the same dark RPG HUD styling as the rest of the system.
 - **Habit Card Action Ambiguity:** Fixed habit cards using a floating `X` plus glowing `+/-` control that did not match the rest of the app. Habits now use a quest-like square log control on the left and a cleaner secondary action menu for removal.
+- **Habit Completion Readability:** Fixed good daily habits looking "logged" without making it obvious that they were already completed for today. Habit cards now switch into a clearer done-today state, disable repeat taps for the rest of the day, and show their reward/meta row in the same visual order as quest cards.
+- **Opaque Daily Reroll Limit:** Fixed daily reroll actions not explaining whether any alternates were still available. Quest action menus now surface the remaining rerolls in today's pool and disable the action with explicit “no rerolls left” copy when the pool is exhausted.
+- **Daily Progress Counter Misalignment:** Fixed the shared daily-progress card looking top-heavy when the “daily objectives cleared” label wrapped to a second line. The fraction and label now align as one vertically centered unit.
+- **Floating Life Rhythm Summary:** Fixed the read-only `Current Life Rhythm` block in Settings visually floating above the wrapped Likes / Dislikes / Focus cards. It now has its own amber-accented wrapper to match the rest of the quest-setup summary language.
+- **Underpriced Hard Boss Gold:** Fixed legacy/stale quest rows being allowed to keep obviously too-low gold rewards. The economy helper now enforces at least the current type+difficulty baseline, so hard bosses and other difficult content cannot display or award token amounts like `+5 Gold`.
+- **Redundant Habit Completion Badge:** Fixed habit cards repeating the same “done today” meaning in both the checked box and a separate status pill. The card now keeps the checkmark as the single completion signal.
 - **Invisible Gold Economy:** Fixed coins existing in the HUD without a clear earn loop. Quest generation and replacement flows now attach meaningful gold rewards, legacy zero-gold quests still award gold on completion, quest cards display gold payouts, and completion feedback surfaces the currency gain immediately.
+- **Habit Progress Outside the Daily Loop:** Fixed good daily habits granting XP/stat rewards without helping the day count as cleared. Logging a daily good habit now invalidates the shared runtime, updates Home/Quests progress immediately, and contributes to the same overnight 80% daily-objective rule as daily quests.
+- **Duplicate / Stale Daily Cards:** Fixed visible daily lists showing repeated micro-tasks such as two `Morning Stretch` cards. Generation, reroll, nightly rotation, and the final UI slice now all dedupe daily quests by normalized title so legacy dirty rows and near-duplicate AI outputs no longer leak into the active list.
+- **Duplicate Side Quest Cards:** Fixed optional quest lists showing the same side quest multiple times (for example repeated `Explore a New Podcast` cards). Side quest generation now deduplicates titles before insert, and the Quests screen hides legacy duplicate side rows as a final safeguard.
+- **Home Daily Add Flow:** Fixed the Home Today's Dailies `+` action sending the player to Quests instead of letting them forge in place. The shared forge modal now opens directly on Home and newly forged daily quests are prioritized into today's visible daily set.
+- **03:00 Streak Drift:** Fixed streak progression and daily reads using raw UTC day windows even though the product reset is nightly `03:00`. Quest completion, skip/reroll accounting, daily habit progress, and nightly streak checks now all use the same app-day key, so a second cleared app day increments the streak instead of staying stuck at `1`.
+- **Silent Overnight Penalty Misses:** Fixed the case where a user could miss the 80% daily threshold and still see no HP/streak consequence because the nightly job had not run. Settlement is now idempotent per app day and can run on authenticated app entry as a fallback, so missed schedules no longer suppress penalties.
+- **Repetitive Daily Pools:** Fixed quest generation relying too heavily on routine text alone. The LLM now sees the last 7 app days of completions, skips with reasons, and recent generated daily titles, which reduces stale repetitions and makes new pools react to actual user behavior.

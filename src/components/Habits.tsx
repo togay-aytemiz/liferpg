@@ -4,13 +4,23 @@ import { useAuth } from '../contexts/AuthContext';
 import { logHabit } from '../lib/api';
 import type { Habit } from '../lib/database.types';
 import HabitCard from './HabitCard';
-import { HABIT_CREATED_EVENT } from '../lib/habitEvents';
-import { getHabitsCacheKey, readCachedValue, VIEW_CACHE_TTL_MS, writeCachedValue } from '../lib/viewCache';
+import { emitHabitRuntimeChanged, HABIT_CREATED_EVENT } from '../lib/habitEvents';
+import {
+    getHabitsCacheKey,
+    getHabitsTodayLogCacheKey,
+    readCachedValue,
+    VIEW_CACHE_TTL_MS,
+    writeCachedValue,
+} from '../lib/viewCache';
 import { Plus, Activity } from 'lucide-react';
+import { getCurrentAppDayWindow } from '../lib/appDay';
+import { invalidateQuestRuntime } from '../lib/questRuntime';
+import { GOOD_HABIT_STAT_GAIN, GOOD_HABIT_XP_REWARD } from '../lib/habitGameplay';
 
 export default function Habits() {
     const { user } = useAuth();
     const [habits, setHabits] = useState<Habit[]>([]);
+    const [loggedTodayIds, setLoggedTodayIds] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<Habit | null>(null);
@@ -27,15 +37,24 @@ export default function Habits() {
 
     useEffect(() => {
         if (!user) return;
-        const cacheKey = getHabitsCacheKey(user.id);
-        const cachedHabits = readCachedValue<Habit[]>(cacheKey);
+        const habitCacheKey = getHabitsCacheKey(user.id);
+        const logCacheKey = getHabitsTodayLogCacheKey(user.id);
+        const cachedHabits = readCachedValue<Habit[]>(habitCacheKey);
+        const cachedLogs = readCachedValue<string[]>(logCacheKey);
+
         if (cachedHabits.hit) {
             setHabits(cachedHabits.value);
-            setLoading(false);
-            return;
         }
 
-        fetchHabits();
+        if (cachedLogs.hit) {
+            setLoggedTodayIds(new Set(cachedLogs.value));
+        }
+
+        if (cachedHabits.hit && cachedLogs.hit) {
+            setLoading(false);
+        } else {
+            fetchHabits();
+        }
     }, [user]);
 
     useEffect(() => {
@@ -63,18 +82,32 @@ export default function Habits() {
     }, [user]);
 
     const fetchHabits = async () => {
-        const { data } = await supabase
-            .from('habits')
-            .select('*')
-            .eq('user_id', user!.id)
-            .eq('is_active', true)
-            .order('created_at', { ascending: false });
+        const todayWindow = getCurrentAppDayWindow();
 
-        if (data) {
-            const nextHabits = data as Habit[];
+        const [{ data: habitRows }, { data: logRows }] = await Promise.all([
+            supabase
+                .from('habits')
+                .select('*')
+                .eq('user_id', user!.id)
+                .eq('is_active', true)
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('habit_logs')
+                .select('habit_id')
+                .eq('user_id', user!.id)
+                .gte('created_at', todayWindow.startIso)
+                .lt('created_at', todayWindow.endIso),
+        ]);
+
+        if (habitRows) {
+            const nextHabits = habitRows as Habit[];
             setHabits(nextHabits);
             writeCachedValue(getHabitsCacheKey(user!.id), nextHabits, VIEW_CACHE_TTL_MS);
         }
+
+        const nextLoggedTodayIds = [...new Set((logRows ?? []).map((row: { habit_id: string }) => row.habit_id))];
+        setLoggedTodayIds(new Set(nextLoggedTodayIds));
+        writeCachedValue(getHabitsTodayLogCacheKey(user!.id), nextLoggedTodayIds, VIEW_CACHE_TTL_MS);
         setLoading(false);
     };
 
@@ -106,6 +139,8 @@ export default function Habits() {
             const nextHabits = [data as Habit, ...habits];
             setHabits(nextHabits);
             writeCachedValue(getHabitsCacheKey(user.id), nextHabits, VIEW_CACHE_TTL_MS);
+            invalidateQuestRuntime(user.id);
+            emitHabitRuntimeChanged();
             setShowModal(false);
             setTitle('');
             showToast("Habit created successfully!");
@@ -113,14 +148,22 @@ export default function Habits() {
     };
 
     const handleLogHabit = async (habit: Habit) => {
+        if (loggedTodayIds.has(habit.id)) return;
+
         try {
             setLoggingId(habit.id);
             const result = await logHabit(habit.id);
             if (result.success) {
+                const nextLoggedTodayIds = [...loggedTodayIds, habit.id];
+                setLoggedTodayIds(new Set(nextLoggedTodayIds));
+                if (user) {
+                    writeCachedValue(getHabitsTodayLogCacheKey(user.id), [...new Set(nextLoggedTodayIds)], VIEW_CACHE_TTL_MS);
+                }
+
                 if (result.died) {
                     showToast("You died from a bad habit! HP restored, but you lost half your gold and your streak was reset.", "error");
                 } else if (habit.is_good) {
-                    showToast(`+5 XP | +1 ${habit.stat_affected}`, "success");
+                    showToast(`+${GOOD_HABIT_XP_REWARD} XP | +${GOOD_HABIT_STAT_GAIN} ${habit.stat_affected}`, "success");
                 } else {
                     showToast(`-5 HP | -2 Gold | -1 ${habit.stat_affected}`, "warning");
                 }
@@ -154,6 +197,18 @@ export default function Habits() {
             }
             return nextHabits;
         });
+        setLoggedTodayIds((prev) => {
+            const next = new Set(prev);
+            next.delete(deleteTarget.id);
+            if (user) {
+                writeCachedValue(getHabitsTodayLogCacheKey(user.id), [...next], VIEW_CACHE_TTL_MS);
+            }
+            return next;
+        });
+        if (user) {
+            invalidateQuestRuntime(user.id);
+            emitHabitRuntimeChanged();
+        }
         setDeleteTarget(null);
         setDeletingId(null);
         showToast('Habit removed.');
@@ -195,6 +250,7 @@ export default function Habits() {
                         <HabitCard
                             key={h.id}
                             habit={h}
+                            isLoggedToday={loggedTodayIds.has(h.id)}
                             isLogging={loggingId === h.id}
                             onLog={handleLogHabit}
                             onRemove={setDeleteTarget}

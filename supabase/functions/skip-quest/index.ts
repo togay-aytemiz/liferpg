@@ -15,10 +15,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 import { callOpenAI } from "../_shared/openai.ts";
+import { buildRecentQuestBehaviorContext } from "../_shared/recentQuestBehavior.ts";
+import { getAppDayKey } from "../../../src/lib/appDay.ts";
+import { dedupeDailyPool, getDailyQuestDedupKey, getLatestQuestBatch } from "../../../src/lib/dailyPool.ts";
 import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
 
 const MAX_DAILY_SKIPS = 3;
-const RECENT_BATCH_WINDOW_MS = 60_000;
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
 const VALID_STATS = new Set(["strength", "knowledge", "wealth", "adventure", "social"]);
 
@@ -58,7 +60,7 @@ serve(async (req) => {
             );
         }
 
-        const today = new Date().toISOString().split("T")[0];
+        const today = getAppDayKey();
 
         // 2. Fetch the quest to get its details
         const { data: quest } = await supabase
@@ -84,7 +86,7 @@ serve(async (req) => {
 
             const { data: latestDailyPool, error: latestDailyPoolError } = await supabase
                 .from("quests")
-                .select("id, title, created_at, is_active")
+                .select("id, title, description, created_at, is_active")
                 .eq("user_id", user.id)
                 .eq("quest_type", "daily")
                 .eq("is_ai_generated", true)
@@ -99,13 +101,10 @@ serve(async (req) => {
                 );
             }
 
-            const newestCreatedAt = new Date(latestDailyPool[0].created_at).getTime();
-            const latestBatch = latestDailyPool
-                .filter((dailyQuest) => {
-                    const createdAt = new Date(dailyQuest.created_at).getTime();
-                    return Number.isFinite(createdAt) && Math.abs(newestCreatedAt - createdAt) <= RECENT_BATCH_WINDOW_MS;
-                })
-                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+            const latestBatch = dedupeDailyPool(
+                getLatestQuestBatch(latestDailyPool).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+                { preferActive: true },
+            );
 
             const { data: completedToday } = await supabase
                 .from("user_quests")
@@ -115,10 +114,12 @@ serve(async (req) => {
                 .eq("is_completed", true);
 
             const completedQuestIds = new Set((completedToday ?? []).map((entry: { quest_id: string }) => entry.quest_id));
+            const currentQuestKey = getDailyQuestDedupKey(quest);
             const replacementQuest = latestBatch.find((dailyQuest) =>
                 dailyQuest.id !== quest_id &&
                 !dailyQuest.is_active &&
-                !completedQuestIds.has(dailyQuest.id)
+                !completedQuestIds.has(dailyQuest.id) &&
+                getDailyQuestDedupKey(dailyQuest) !== currentQuestKey
             );
 
             if (!replacementQuest) {
@@ -293,6 +294,7 @@ serve(async (req) => {
         const likesText = profile?.likes ? `\nWhat I LIKE/ENJOY: ${profile.likes}` : "";
         const dislikesText = profile?.dislikes ? `\nWhat I HATE/DISLIKE (AVOID THESE): ${profile.dislikes}` : "";
         const focusText = profile?.focus_areas ? `\nMy FOCUS AREAS to improve: ${profile.focus_areas}` : "";
+        const { context: recentBehaviorContext } = await buildRecentQuestBehaviorContext(supabase as any, user.id, { appDays: 7 });
 
         const replacementPrompt = `The user just skipped a ${quest.quest_type} quest titled "${quest.title}" because: "${safeReason}".
         
@@ -302,7 +304,7 @@ User's Daily Routine:
 ${profile?.life_rhythm || "General healthy lifestyle"}${likesText}${dislikesText}${focusText}
 
 Stats - Strength: ${profile?.stat_strength}, Knowledge: ${profile?.stat_knowledge}, Wealth: ${profile?.stat_wealth}, Adventure: ${profile?.stat_adventure}, Social: ${profile?.stat_social}
-${historyContext}${skipContext}
+${historyContext}${skipContext}${recentBehaviorContext}
 
 Return valid JSON:
 {
@@ -320,7 +322,7 @@ Return valid JSON:
                 [
                     {
                         role: "system",
-                        content: "You are a LifeRPG quest designer. Generate exactly ONE replacement quest as valid JSON only. Never return markdown.",
+                        content: "You are a LifeRPG quest designer. Generate exactly ONE replacement quest as valid JSON only. Never return markdown. Treat recent skipped/disliked behavior as a hard anti-repetition signal.",
                     },
                     { role: "user", content: replacementPrompt },
                 ],

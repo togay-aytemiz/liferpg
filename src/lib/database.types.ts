@@ -34,6 +34,7 @@ export interface Profile {
     stat_adventure: number;
     stat_social: number;
     streak_freezes: number;
+    last_daily_settlement_day: string | null; // YYYY-MM-DD app-day key already settled
     created_at: string;
     updated_at: string;
 }
@@ -69,7 +70,7 @@ export interface UserQuest {
     id: string;
     user_id: string;
     quest_id: string;
-    quest_date: string; // YYYY-MM-DD
+    quest_date: string; // YYYY-MM-DD app-day key (03:00 -> 03:00)
     is_completed: boolean;
     completed_at: string | null;
     xp_awarded: number;
@@ -100,7 +101,7 @@ export interface Streak {
     user_id: string;
     current_streak: number;
     longest_streak: number;
-    last_active_date: string | null; // YYYY-MM-DD
+    last_active_date: string | null; // YYYY-MM-DD app-day key (03:00 -> 03:00)
     xp_multiplier: number;
     created_at: string;
     updated_at: string;

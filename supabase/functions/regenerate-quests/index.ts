@@ -12,6 +12,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callOpenAI, validateQuestResponse } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { buildRecentQuestBehaviorContext } from "../_shared/recentQuestBehavior.ts";
+import { dedupeDailyPool, dedupeQuestPoolByTitle } from "../../../src/lib/dailyPool.ts";
 import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
 
 const DAILY_POOL_LIMIT = 7;
@@ -71,7 +73,11 @@ You MUST return valid JSON with this exact structure:
 Rules:
 - Generate 5-7 daily quests as a SMALL weekly pool
 - The first daily quests in the array should be the best fit for TODAY; later ones should feel like alternate dailies for the next few days
+- Daily quests MUST be distinct from each other. Do not return duplicate or near-duplicate micro-actions in the same weekly pool
+- Spread the daily pool across multiple life areas/stats when the user's routine allows it
+- If it does not conflict with dislikes or the described routine, include at least one knowledge-oriented daily (reading, studying, learning, language practice, etc.)
 - Generate 1-2 side quests and 1 boss quest
+- Side quests MUST also be distinct from each other. Do not return duplicate or near-duplicate optional quests
 - Generate 2-3 chain_quests that form a QUEST CHAIN with the boss quest:
   - Each chain quest is a progressively harder continuation of the boss quest
   - Think of it as chapters in a story: Step 1 (boss_quest) → Step 2 → Step 3 → Step 4
@@ -83,7 +89,8 @@ Rules:
 - Keep the user's ACTIVE list small and game-like. Do not create an overwhelming wall of chores.
 - Match activities to stats: exercise→strength, reading→knowledge, work→wealth, travel→adventure, social→social
 - Keep titles concise and RPG-themed
-- IMPORTANT CONTEXT AVOIDANCE: If the user provides 'active_habits', DO NOT generate Daily or Side quests that perfectly match these existing habits. Generate complementary or entirely new quests instead.`;
+- IMPORTANT CONTEXT AVOIDANCE: If the user provides 'active_habits', DO NOT generate Daily or Side quests that perfectly match these existing habits. Generate complementary or entirely new quests instead.
+- IMPORTANT RECENT MEMORY: If the prompt includes recent app-day behavior, use it as a hard novelty signal. Build on what the user completed, avoid what they skipped or disliked, and avoid recycling the same daily titles from the recent generated history.`;
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -200,13 +207,15 @@ serve(async (req) => {
                 .join(", ")}`
             : "";
 
+        const { context: recentBehaviorContext } = await buildRecentQuestBehaviorContext(supabase as any, user.id, { appDays: 7 });
+
         // 4. Call OpenAI
         const aiResponse = await callOpenAI(
             [
                 { role: "system", content: SYSTEM_PROMPT },
                 {
                     role: "user",
-                    content: `Here is my updated daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${historyContext}${skipContext}${habitsContext}\n\nPlease generate quests highly tailored to my routine, my focus areas, and my likes. Strictly AVOID what I hate! Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).`,
+                    content: `Here is my updated daily routine:\n\n${life_rhythm}${likesText}${dislikesText}${focusText}${historyContext}${skipContext}${habitsContext}${recentBehaviorContext}\n\nPlease generate quests highly tailored to my routine, my focus areas, my likes, and my recent real behavior. Strictly AVOID what I hate, what I recently skipped, and stale repetitions of the same daily titles. Feel free to occasionally include meaningful "Avoidance/Negative" goals (e.g., "Do not smoke", "Less than 1 hour on social media") that test my willpower (usually boosting Strength).`,
                 },
             ],
             {
@@ -218,9 +227,9 @@ serve(async (req) => {
         );
 
         const generatedQuests = validateQuestResponse(aiResponse);
-        const dailyQuestPool = generatedQuests.daily_quests.slice(0, DAILY_POOL_LIMIT);
+        const dailyQuestPool = dedupeDailyPool(generatedQuests.daily_quests).slice(0, DAILY_POOL_LIMIT);
         const activeDailyCount = getActiveDailyLimit(dailyQuestPool.length);
-        const sideQuests = generatedQuests.side_quests.slice(0, SIDE_QUEST_LIMIT);
+        const sideQuests = dedupeQuestPoolByTitle(generatedQuests.side_quests).slice(0, SIDE_QUEST_LIMIT);
 
         // Generate a chain_id for boss + chain quests
         const chainId = crypto.randomUUID();
@@ -329,8 +338,8 @@ serve(async (req) => {
                 success: true,
                 quests: insertedQuests,
                 summary: {
-                    daily: generatedQuests.daily_quests.length,
-                    side: generatedQuests.side_quests.length,
+                    daily: dailyQuestPool.length,
+                    side: sideQuests.length,
                     boss: 1,
                     chain: chainQuests.length,
                 },

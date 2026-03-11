@@ -1,6 +1,11 @@
 import type { Quest } from './database.types';
+import { dedupeDailyPool } from './dailyPool';
+import {
+    DAILY_RESET_HOUR,
+    formatDailyResetClock,
+    getNextDailyResetDate,
+} from './appDay';
 
-export const DAILY_RESET_HOUR = 3;
 export const MAX_DAILY_QUEST_REGENERATIONS = 3;
 
 export function xpRequiredForLevel(level: number): number {
@@ -17,17 +22,48 @@ function byCreatedAtAscending(a: Quest, b: Quest): number {
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
 }
 
+function compareVisibleDailyPriority(a: Quest, b: Quest): number {
+    const aCustomPriority = a.is_custom ? 0 : 1;
+    const bCustomPriority = b.is_custom ? 0 : 1;
+    if (aCustomPriority !== bCustomPriority) {
+        return aCustomPriority - bCustomPriority;
+    }
+
+    if (a.is_custom && b.is_custom) {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    }
+
+    return byCreatedAtAscending(a, b);
+}
+
 export function getVisibleDailyQuests(quests: Quest[]): Quest[] {
     const dailyQuests = quests
         .filter((quest) => quest.quest_type === 'daily')
-        .sort(byCreatedAtAscending);
+        .sort(compareVisibleDailyPriority);
 
-    return dailyQuests.slice(0, getManageableDailyCount(dailyQuests.length));
+    const uniqueDailyQuests = dedupeDailyPool(dailyQuests, { preferActive: true });
+
+    return uniqueDailyQuests.slice(0, getManageableDailyCount(uniqueDailyQuests.length));
 }
 
 export function getDailyQuestProgress(visibleDailyQuests: Quest[], completedIds: Set<string>) {
     const total = visibleDailyQuests.length;
     const completed = visibleDailyQuests.filter((quest) => completedIds.has(quest.id)).length;
+
+    return { completed, total };
+}
+
+export function getDailyObjectiveProgress(
+    visibleDailyQuests: Quest[],
+    completedQuestIds: Set<string>,
+    activeDailyHabitIds: string[],
+    loggedDailyHabitIds: string[],
+) {
+    const completedHabitIds = new Set(loggedDailyHabitIds);
+    const total = visibleDailyQuests.length + activeDailyHabitIds.length;
+    const completed =
+        visibleDailyQuests.filter((quest) => completedQuestIds.has(quest.id)).length +
+        activeDailyHabitIds.filter((habitId) => completedHabitIds.has(habitId)).length;
 
     return { completed, total };
 }
@@ -53,23 +89,8 @@ export function getVisibleWeeklyBoss(quests: Quest[], completedIds: Set<string>)
     return sortedBosses[0] ?? null;
 }
 
-export function getNextDailyResetDate(now = new Date(), resetHour = DAILY_RESET_HOUR): Date {
-    const nextReset = new Date(now);
-    nextReset.setHours(resetHour, 0, 0, 0);
-
-    if (now.getTime() >= nextReset.getTime()) {
-        nextReset.setDate(nextReset.getDate() + 1);
-    }
-
-    return nextReset;
-}
-
-export function formatDailyResetClock(resetHour = DAILY_RESET_HOUR): string {
-    return `${String(resetHour).padStart(2, '0')}:00`;
-}
-
 export function formatCountdownToDailyReset(now = new Date(), resetHour = DAILY_RESET_HOUR): string {
-    const diffMs = Math.max(0, getNextDailyResetDate(now, resetHour).getTime() - now.getTime());
+    const diffMs = Math.max(0, getNextDailyResetDate(now, { resetHour }).getTime() - now.getTime());
     const totalSeconds = Math.floor(diffMs / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -77,3 +98,5 @@ export function formatCountdownToDailyReset(now = new Date(), resetHour = DAILY_
 
     return `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
 }
+
+export { DAILY_RESET_HOUR, formatDailyResetClock, getNextDailyResetDate };
