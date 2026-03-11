@@ -17,12 +17,14 @@ import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
 import { callOpenAI } from "../_shared/openai.ts";
 import { buildRecentQuestBehaviorContext } from "../_shared/recentQuestBehavior.ts";
 import { getAppDayKey } from "../../../src/lib/appDay.ts";
-import { dedupeDailyPool, getDailyQuestDedupKey, getLatestQuestBatch } from "../../../src/lib/dailyPool.ts";
+import { dedupeDailyPool, getDailyQuestDedupKey } from "../../../src/lib/dailyPool.ts";
 import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
+import { buildRerollReasonPrompt } from "../../../src/lib/rerollReasons.ts";
 
 const MAX_DAILY_SKIPS = 3;
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
 const VALID_STATS = new Set(["strength", "knowledge", "wealth", "adventure", "social"]);
+const VALID_REROLL_BUCKETS = new Set(["wrong_time", "too_easy", "too_hard", "not_interested", "not_relevant", "energy_mismatch", "custom"]);
 
 function clamp(val: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, val));
@@ -52,7 +54,7 @@ serve(async (req) => {
             );
         }
 
-        const { quest_id, reason, mode } = await req.json();
+        const { quest_id, reason, mode, reason_bucket, reason_detail } = await req.json();
         if (!quest_id) {
             return new Response(
                 JSON.stringify({ error: "quest_id is required" }),
@@ -84,7 +86,24 @@ serve(async (req) => {
                 );
             }
 
-            const { data: latestDailyPool, error: latestDailyPoolError } = await supabase
+            if (!reason_bucket || typeof reason_bucket !== "string" || !VALID_REROLL_BUCKETS.has(reason_bucket)) {
+                return new Response(
+                    JSON.stringify({ error: "reason_bucket is required for daily rerolls" }),
+                    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+
+            const safeReasonDetail = typeof reason_detail === "string" ? reason_detail.trim().slice(0, 280) : "";
+            if (reason_bucket === "custom" && safeReasonDetail.length === 0) {
+                return new Response(
+                    JSON.stringify({ error: "Custom reroll reason is required" }),
+                    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+            }
+
+            const rerollReason = buildRerollReasonPrompt(reason_bucket, safeReasonDetail);
+
+            const { data: allDailyPoolRows, error: dailyPoolError } = await supabase
                 .from("quests")
                 .select("id, title, description, created_at, is_active")
                 .eq("user_id", user.id)
@@ -92,17 +111,17 @@ serve(async (req) => {
                 .eq("is_ai_generated", true)
                 .eq("is_custom", false)
                 .order("created_at", { ascending: false })
-                .limit(20);
+                .limit(60);
 
-            if (latestDailyPoolError || !latestDailyPool || latestDailyPool.length === 0) {
+            if (dailyPoolError || !allDailyPoolRows || allDailyPoolRows.length === 0) {
                 return new Response(
                     JSON.stringify({ error: "No daily quest pool available for reroll" }),
                     { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
                 );
             }
 
-            const latestBatch = dedupeDailyPool(
-                getLatestQuestBatch(latestDailyPool).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+            const dedupedDailyPool = dedupeDailyPool(
+                allDailyPoolRows,
                 { preferActive: true },
             );
 
@@ -115,12 +134,31 @@ serve(async (req) => {
 
             const completedQuestIds = new Set((completedToday ?? []).map((entry: { quest_id: string }) => entry.quest_id));
             const currentQuestKey = getDailyQuestDedupKey(quest);
-            const replacementQuest = latestBatch.find((dailyQuest) =>
+            const activeDailyKeys = new Set(
+                dedupedDailyPool
+                    .filter((dailyQuest) => dailyQuest.is_active)
+                    .map((dailyQuest) => getDailyQuestDedupKey(dailyQuest)),
+            );
+            const replacementQuest = dedupedDailyPool.find((dailyQuest) =>
                 dailyQuest.id !== quest_id &&
                 !dailyQuest.is_active &&
                 !completedQuestIds.has(dailyQuest.id) &&
-                getDailyQuestDedupKey(dailyQuest) !== currentQuestKey
+                getDailyQuestDedupKey(dailyQuest) !== currentQuestKey &&
+                !activeDailyKeys.has(getDailyQuestDedupKey(dailyQuest))
             );
+
+            await supabase
+                .from("quest_feedback")
+                .upsert({
+                    user_id: user.id,
+                    quest_id,
+                    quest_title: quest.title,
+                    quest_type: quest.quest_type,
+                    feedback_type: "reroll",
+                    reason_bucket,
+                    reason_detail: safeReasonDetail || null,
+                    app_day_key: today,
+                }, { onConflict: "user_id,quest_id,feedback_type,app_day_key" });
 
             if (!replacementQuest) {
                 return new Response(
@@ -154,6 +192,7 @@ serve(async (req) => {
                 JSON.stringify({
                     success: true,
                     rerolled_quest: quest.title,
+                    reroll_reason: rerollReason,
                     new_quest: activatedQuest,
                     message: `Daily rerolled: "${activatedQuest.title}"`,
                 }),

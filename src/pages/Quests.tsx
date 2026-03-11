@@ -13,8 +13,10 @@ import AppHeader from '../components/AppHeader';
 import DailyProgressCard from '../components/DailyProgressCard';
 import QuestCard from '../components/QuestCard';
 import CustomQuestModal from '../components/CustomQuestModal';
+import RerollReasonModal from '../components/RerollReasonModal';
 import { APP_RUNTIME_CHANGED_EVENT, emitHabitCreated, HABIT_RUNTIME_CHANGED_EVENT } from '../lib/habitEvents';
 import { fetchQuestRuntime } from '../lib/questRuntime';
+import type { RerollReasonBucket } from '../lib/rerollReasons';
 
 export default function Quests() {
     const { user, refreshProfile } = useAuth();
@@ -34,6 +36,7 @@ export default function Quests() {
     const [loggedDailyHabitIds, setLoggedDailyHabitIds] = useState<string[]>([]);
 
     const [customModalOpen, setCustomModalOpen] = useState(false);
+    const [rerollModalQuest, setRerollModalQuest] = useState<Quest | null>(null);
 
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
         setToast({ msg, type });
@@ -99,15 +102,20 @@ export default function Quests() {
         setRegenerateModalOpen({ id: quest.id, title: quest.title });
     };
 
-    const handleRerollDaily = async (quest: Quest) => {
+    const handleOpenRerollDaily = (quest: Quest) => {
         if (loadingId || regeneratingId || rerollingId || habitActionId || completedIds.has(quest.id)) return;
-        setRerollingId(quest.id);
+        setRerollModalQuest(quest);
+    };
+
+    const handleConfirmRerollDaily = async (reasonBucket: RerollReasonBucket, reasonDetail?: string) => {
+        if (!rerollModalQuest) return;
+        setRerollingId(rerollModalQuest.id);
 
         try {
-            const result = await rerollDailyQuest(quest.id);
+            const result = await rerollDailyQuest(rerollModalQuest.id, reasonBucket, reasonDetail);
 
             setQuests((prev) => {
-                const withoutOldQuest = prev.filter((existingQuest) => existingQuest.id !== quest.id);
+                const withoutOldQuest = prev.filter((existingQuest) => existingQuest.id !== rerollModalQuest.id);
                 if (!result.new_quest) return withoutOldQuest;
 
                 return [...withoutOldQuest, result.new_quest].sort((a, b) =>
@@ -121,6 +129,7 @@ export default function Quests() {
             console.error(err);
             showToast(err.message || 'Failed to reroll daily quest', 'error');
         } finally {
+            setRerollModalQuest(null);
             setRerollingId(null);
         }
     };
@@ -260,7 +269,7 @@ export default function Quests() {
                         isActionLoading={regeneratingId === quest.id || rerollingId === quest.id || habitActionId === quest.id}
                         onComplete={handleComplete}
                         onMakeHabit={handleMakeHabit}
-                        onRerollDaily={quest.quest_type === 'daily' ? handleRerollDaily : undefined}
+                        onRerollDaily={quest.quest_type === 'daily' ? handleOpenRerollDaily : undefined}
                         remainingDailyRerolls={quest.quest_type === 'daily' ? remainingDailyRerolls : null}
                         onRegenerate={quest.quest_type !== 'daily' ? handleOpenRegenerate : undefined}
                         remainingRegenerations={quest.quest_type !== 'daily' ? remainingRegenerations : null}
@@ -318,6 +327,18 @@ export default function Quests() {
                     }}
                 />
             )}
+
+            <RerollReasonModal
+                open={!!rerollModalQuest}
+                quest={rerollModalQuest}
+                remainingAlternatives={remainingDailyRerolls}
+                loading={!!rerollingId}
+                onClose={() => {
+                    if (rerollingId) return;
+                    setRerollModalQuest(null);
+                }}
+                onConfirm={handleConfirmRerollDaily}
+            />
         </div>
     );
 }

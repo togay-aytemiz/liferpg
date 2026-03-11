@@ -17,6 +17,7 @@ export const getDashboardStreakCacheKey = (userId: string) => `dashboard-streak:
 export const getHabitsCacheKey = (userId: string) => `habits:${userId}`;
 export const getHabitsTodayLogCacheKey = (userId: string) => `habits-today:${userId}`;
 export const getShopCacheKey = (userId: string) => `shop:${userId}`;
+export const getInventoryCacheKey = (userId: string) => `inventory:${userId}`;
 export const getAwardsCacheKey = (userId: string) => `awards:${userId}`;
 
 export function readCachedValue<T>(key: string): CacheRead<T> {

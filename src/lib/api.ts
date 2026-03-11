@@ -2,17 +2,20 @@
 // All AI-related calls go through here.
 
 import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
-import type { Habit, Quest, ShopItem } from './database.types';
+import type { Habit, InventoryItem, Quest, ShopItem } from './database.types';
 import { getAppDayKey } from './appDay';
 import { invalidateQuestRuntime } from './questRuntime';
 import {
     getAwardsCacheKey,
     getDashboardStreakCacheKey,
     getHabitsCacheKey,
+    getInventoryCacheKey,
     getShopCacheKey,
     invalidateCachedValue,
 } from './viewCache';
 import { emitAppRuntimeChanged, emitHabitRuntimeChanged } from './habitEvents';
+import type { RerollReasonBucket } from './rerollReasons';
+import { getSuggestedHabitRewards } from './habitGameplay';
 
 interface GenerateQuestsResponse {
     success: boolean;
@@ -325,10 +328,19 @@ export async function regenerateQuest(questId: string, reason: string): Promise<
     return skipQuest(questId, reason);
 }
 
-export async function rerollDailyQuest(questId: string): Promise<{ success: boolean; rerolled_quest: string; new_quest: Quest | null; message: string }> {
+export async function rerollDailyQuest(
+    questId: string,
+    reasonBucket: RerollReasonBucket,
+    reasonDetail?: string,
+): Promise<{ success: boolean; rerolled_quest: string; new_quest: Quest | null; message: string; reroll_reason?: string }> {
     const response = await invokeEdgeFunction<{ success: boolean; rerolled_quest: string; new_quest: Quest | null; message: string }>(
         'skip-quest',
-        { quest_id: questId, mode: 'reroll' },
+        {
+            quest_id: questId,
+            mode: 'reroll',
+            reason_bucket: reasonBucket,
+            reason_detail: reasonDetail?.trim() || undefined,
+        },
         'Failed to reroll daily quest'
     );
 
@@ -363,10 +375,10 @@ export async function createCustomQuest(prompt: string, questType: 'daily' | 'si
  * Call the buy-item Edge Function.
  * Spends user gold to purchase items like Health Potions, XP Scrolls, or Streak Freezes.
  */
-export async function buyItem(itemId: string): Promise<{ success: boolean; message: string; updates: any }> {
-    const data = await invokeEdgeFunction<{ success: boolean; message: string; updates: any; error?: string }>(
+export async function buyItem(itemId: string): Promise<{ success: boolean; message: string; inventory_item?: InventoryItem; gold_remaining?: number }> {
+    const data = await invokeEdgeFunction<{ success: boolean; message: string; inventory_item?: InventoryItem; gold_remaining?: number; error?: string }>(
         'buy-item',
-        { item_id: itemId },
+        { item_id: itemId, item_source: 'static' },
         'Failed to buy item'
     );
 
@@ -377,6 +389,7 @@ export async function buyItem(itemId: string): Promise<{ success: boolean; messa
     const userId = await getSessionUserId();
     if (userId) {
         invalidateCachedValue(getShopCacheKey(userId));
+        invalidateCachedValue(getInventoryCacheKey(userId));
     }
 
     return data;
@@ -414,7 +427,18 @@ export async function convertToHabit(questTitle: string, statAffected?: string |
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Not authenticated');
 
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('level')
+        .eq('id', session.user.id)
+        .single() as { data: { level: number } | null; error: unknown };
+
     const normalizedTitle = questTitle.trim();
+    const habitRewards = getSuggestedHabitRewards({
+        frequency,
+        isGood: true,
+        level: profile?.level,
+    });
     const { data: existingHabit } = await supabase
         .from('habits')
         .select('*')
@@ -435,6 +459,9 @@ export async function convertToHabit(questTitle: string, statAffected?: string |
             is_good: true,
             stat_affected: statAffected || 'strength',
             frequency: frequency,
+            xp_reward: habitRewards.xpReward,
+            gold_reward: habitRewards.goldReward,
+            stat_points: habitRewards.statPoints,
         } as any)
         .select()
         .single();
@@ -472,58 +499,40 @@ export async function generateShopItems(): Promise<{ success: boolean; items: Sh
  * Purchase a dynamic real-life shop item.
  * Deducts gold and marks the item as purchased.
  */
-export async function purchaseShopItem(itemId: string): Promise<{ success: boolean; item: ShopItem }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
+export async function purchaseShopItem(itemId: string): Promise<{ success: boolean; message: string; inventory_item?: InventoryItem; gold_remaining?: number }> {
+    const data = await invokeEdgeFunction<{ success: boolean; message: string; inventory_item?: InventoryItem; gold_remaining?: number; error?: string }>(
+        'buy-item',
+        { item_id: itemId, item_source: 'dynamic' },
+        'Failed to purchase shop item',
+    );
 
-    // Fetch the item
-    const { data: item, error: itemError } = await supabase
-        .from('shop_items' as any)
-        .select('*')
-        .eq('id', itemId)
-        .eq('user_id', session.user.id)
-        .single() as any;
-
-    if (itemError || !item) {
-        throw new Error('Item not found');
+    if (data.error) {
+        throw new Error(data.error);
     }
 
-    if (item.is_purchased) {
-        throw new Error('Item already purchased');
+    const userId = await getSessionUserId();
+    if (userId) {
+        invalidateCachedValue(getShopCacheKey(userId));
+        invalidateCachedValue(getInventoryCacheKey(userId));
     }
 
-    // Fetch user gold
-    const { data: profile, error: profileError } = await supabase
-        .from('profiles' as any)
-        .select('gold')
-        .eq('id', session.user.id)
-        .single() as any;
+    return data;
+}
 
-    if (profileError || !profile) {
-        throw new Error('Could not fetch user profile');
+export async function useInventoryItem(inventoryItemId: string): Promise<{ success: boolean; message: string; inventory_item?: InventoryItem | null; profile_updates?: Record<string, unknown> }> {
+    const response = await invokeEdgeFunction<{ success: boolean; message: string; inventory_item?: InventoryItem | null; profile_updates?: Record<string, unknown> }>(
+        'use-inventory-item',
+        { inventory_item_id: inventoryItemId },
+        'Failed to use inventory item',
+    );
+
+    const userId = await getSessionUserId();
+    if (userId) {
+        invalidateCachedValue(getInventoryCacheKey(userId));
+        invalidateCachedValue(getShopCacheKey(userId));
+        invalidateCachedValue(getDashboardStreakCacheKey(userId));
+        invalidateCachedValue(getAwardsCacheKey(userId));
     }
 
-    if ((profile as any).gold < (item as any).cost) {
-        throw new Error('Not enough gold!');
-    }
-
-    // Deduct gold directly
-    await (supabase.from('profiles' as any) as any)
-        .update({ gold: (profile as any).gold - (item as any).cost } as any)
-        .eq('id', session.user.id);
-
-    // Mark item as purchased
-    const { data: purchasedItem, error: updateError } = await (supabase
-        .from('shop_items' as any) as any)
-        .update({ is_purchased: true })
-        .eq('id', itemId)
-        .select()
-        .single();
-
-    if (updateError) {
-        throw new Error('Failed to mark item as purchased');
-    }
-
-    invalidateCachedValue(getShopCacheKey(session.user.id));
-    return { success: true, item: purchasedItem as ShopItem };
+    return response;
 }

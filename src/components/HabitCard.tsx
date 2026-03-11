@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, MoreHorizontal, ShieldAlert, Trash2 } from 'lucide-react';
+import { Check, Coins, MoreHorizontal, ShieldAlert, Trash2 } from 'lucide-react';
 import type { Habit } from '../lib/database.types';
 import {
     BAD_HABIT_GOLD_LOSS,
     BAD_HABIT_HP_LOSS,
+    getHabitGoldReward,
     getHabitSubtitle,
-    GOOD_HABIT_STAT_GAIN,
-    GOOD_HABIT_XP_REWARD,
+    getHabitStatPoints,
+    getHabitXpReward,
 } from '../lib/habitGameplay';
 
 type HabitCardProps = {
@@ -60,6 +61,9 @@ export default function HabitCard({
         ? 'border-emerald-900/40 bg-emerald-900/10 text-emerald-300'
         : 'border-red-900/40 bg-red-900/10 text-red-300';
     const subtitle = getHabitSubtitle(habit, isLoggedToday);
+    const habitXpReward = getHabitXpReward(habit);
+    const habitGoldReward = getHabitGoldReward(habit);
+    const habitStatPoints = getHabitStatPoints(habit);
 
     return (
         <div className={`relative flex items-start gap-3 rounded-lg border bg-slate-800 p-4 shadow-hud transition-all duration-300 ${cardBorderClass}`}>
@@ -114,8 +118,14 @@ export default function HabitCard({
 
                 <div className="mt-1.5 flex flex-wrap items-center gap-3">
                     <span className={`text-xs font-mono ${isGoodHabit ? 'text-amber-400' : 'text-red-400'}`}>
-                        {isGoodHabit ? `+${GOOD_HABIT_XP_REWARD} XP` : `-${BAD_HABIT_HP_LOSS} HP`}
+                        {isGoodHabit ? `+${habitXpReward} XP` : `-${BAD_HABIT_HP_LOSS} HP`}
                     </span>
+                    {isGoodHabit ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-mono text-yellow-300">
+                            <Coins className="h-3.5 w-3.5 text-amber-400" />
+                            +{habitGoldReward} Gold
+                        </span>
+                    ) : null}
                     {!isGoodHabit ? (
                         <span className="text-xs font-mono text-red-300">
                             -{BAD_HABIT_GOLD_LOSS} Gold
@@ -123,7 +133,7 @@ export default function HabitCard({
                     ) : null}
                     <span className={`inline-flex items-center gap-1 text-xs font-heading uppercase tracking-[0.16em] ${metaAccentClass}`}>
                         {isGoodHabit ? <Check className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
-                        {habit.is_good ? `+${GOOD_HABIT_STAT_GAIN} ${habit.stat_affected}` : habit.stat_affected}
+                        {habit.is_good ? `+${habitStatPoints} ${habit.stat_affected}` : habit.stat_affected}
                     </span>
                     <span className={`rounded-md border px-2 py-0.5 text-[10px] font-heading uppercase tracking-[0.16em] ${tagClass}`}>
                         {habit.frequency}

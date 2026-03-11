@@ -85,6 +85,11 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **03:00 App-Day Streak Alignment:** Streaks, daily completions, reroll counts, and daily habit progress now all use the same `03:00 -> 03:00` app-day boundary instead of UTC day splits, so second-day streaks increment when the player clears the next app day.
 - [x] **Recent Behavior-Aware Daily Generation:** Quest generation now uses the last 7 app days of completions, skipped quests with reasons, and recent generated daily titles to avoid stale repetition and build more intelligent daily pools.
 - [x] **Authenticated Daily Settlement Fallback:** Daily HP/streak settlement and pool rotation no longer rely only on a background cron; the app now performs an idempotent user-scoped daily settlement on authenticated entry/return after reset.
+- [x] **Reroll Feedback Memory:** Daily rerolls now require a structured reason (with optional custom detail), store that feedback per app day, and feed it back into later LLM generation so the system learns what the player is rejecting.
+- [x] **Persistent Bazaar Inventory:** Bazaar purchases now become inventory items instead of instant one-shot effects; static consumables and personalized offers can be bought, stacked, and used or redeemed later from an inventory section.
+- [x] **Habit Reward Economy:** Good habits now award gold as well as XP, and newly created custom habits derive reward values from frequency, polarity, and the player's current level instead of using flat generic rewards.
+- [x] **Character Stat Iconography:** The Character screen now decorates each stat lane with a dedicated icon and tuned accent color so the stat block reads more like an RPG attribute panel.
+- [x] **Hero HUD Copy Cleanup:** Removed the redundant economy helper line under the hero name so the top card stays tighter and less repetitive.
 - [ ] Testing, QA, and bug fixing.
 - [ ] Final UI/UX polish (ensure it feels like an RPG HUD).
 

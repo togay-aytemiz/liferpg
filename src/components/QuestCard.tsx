@@ -162,9 +162,9 @@ export default function QuestCard({
                                     <span className="mt-1 text-[11px] text-slate-500">
                                         {typeof remainingDailyRerolls === 'number'
                                             ? remainingDailyRerolls > 0
-                                                ? `${remainingDailyRerolls} rerolls left in today's pool`
-                                                : `No rerolls left in today's pool`
-                                            : 'Checking rerolls left...'}
+                                                ? `${remainingDailyRerolls} alternate ${remainingDailyRerolls === 1 ? 'daily' : 'dailies'} available`
+                                                : `No alternate dailies left in the current reserve`
+                                            : 'Checking alternate dailies...'}
                                     </span>
                                 </button>
                             )}

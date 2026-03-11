@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callOpenAI } from "../_shared/openai.ts";
 import { createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { getQuestGoldReward } from "../../../src/lib/questEconomy.ts";
 
 const VALID_TYPES = new Set(["daily", "side", "boss"]);
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard", "epic"]);
@@ -64,15 +65,28 @@ serve(async (req) => {
             ? activeHabits.map((h: { title: string; frequency: string }) => `${h.title} (${h.frequency})`).join(", ")
             : "None";
 
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("level, stat_strength, stat_knowledge, stat_wealth, stat_adventure, stat_social, life_rhythm, likes, dislikes, focus_areas")
+            .eq("id", user.id)
+            .single();
+
         const systemPrompt = `You are a game master for a real-life habit tracker RPG.
-The user wants to add ONE custom quest (type: ${targetType}).
+	The user wants to add ONE custom quest (type: ${targetType}).
 
-CRITICAL AVOIDANCE RULE:
-If the user's request is about NOT doing something (e.g. "don't smoke", "less than 1 hour social media"), treat it as a willpower challenge.
-For avoidance goals, prefer stat_affected = "strength" unless another stat is clearly better.
+	CRITICAL AVOIDANCE RULE:
+	If the user's request is about NOT doing something (e.g. "don't smoke", "less than 1 hour social media"), treat it as a willpower challenge.
+	For avoidance goals, prefer stat_affected = "strength" unless another stat is clearly better.
 
-The user already has these active habits: ${habitsContext}
-If the request overlaps an existing habit, keep the quest but make it distinct/complementary.
+	The player's current level is ${profile?.level ?? 1}. Tune difficulty, XP, and stat growth to feel fair for that current stage.
+	Current stats: strength ${profile?.stat_strength ?? 0}, knowledge ${profile?.stat_knowledge ?? 0}, wealth ${profile?.stat_wealth ?? 0}, adventure ${profile?.stat_adventure ?? 0}, social ${profile?.stat_social ?? 0}.
+	Current routine context: ${profile?.life_rhythm || "No saved life rhythm"}.
+	Likes: ${profile?.likes || "none"}.
+	Dislikes: ${profile?.dislikes || "none"}.
+	Focus: ${profile?.focus_areas || "none"}.
+
+	The user already has these active habits: ${habitsContext}
+	If the request overlaps an existing habit, keep the quest but make it distinct/complementary.
 
 Return EXACTLY one JSON object with this structure:
 {
@@ -123,7 +137,11 @@ Return EXACTLY one JSON object with this structure:
                 ? "strength"
                 : "knowledge";
         const xp_reward = clamp(Number(parsed.xp_reward) || 15, 5, 100);
-        const gold_reward = clamp(Number(parsed.gold_reward) || 0, 0, 50);
+        const aiGoldReward = clamp(Number(parsed.gold_reward) || 0, 0, 50);
+        const gold_reward = Math.max(
+            aiGoldReward,
+            getQuestGoldReward(targetType as "daily" | "side" | "boss", difficulty as "easy" | "medium" | "hard" | "epic"),
+        );
 
         const { data: newQuest, error: insertError } = await supabase
             .from("quests")

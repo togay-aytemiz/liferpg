@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import type { Quest } from './database.types';
 import { getAppDayKey, getCurrentAppDayWindow } from './appDay';
 import { MAX_DAILY_QUEST_REGENERATIONS } from './gameplay';
-import { dedupeDailyPool, getDailyQuestDedupKey, getLatestQuestBatch } from './dailyPool';
+import { dedupeDailyPool, getDailyQuestDedupKey } from './dailyPool';
 import { getQuestRuntimeCacheKey, readCachedValue, VIEW_CACHE_TTL_MS, writeCachedValue, invalidateCachedValue } from './viewCache';
 
 export type QuestRuntimeSnapshot = {
@@ -81,7 +81,7 @@ export async function fetchQuestRuntime(userId: string, options?: { force?: bool
             .eq('is_ai_generated', true)
             .eq('is_custom', false)
             .order('created_at', { ascending: false })
-            .limit(20),
+            .limit(60),
         supabase
             .from('habits')
             .select('id')
@@ -111,7 +111,7 @@ export async function fetchQuestRuntime(userId: string, options?: { force?: bool
         is_active: boolean;
     }>;
     const latestDailyBatch = dedupeDailyPool(
-        getLatestQuestBatch(latestDailyPool).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+        latestDailyPool,
         { preferActive: true },
     );
     const activeDailyKeys = new Set(

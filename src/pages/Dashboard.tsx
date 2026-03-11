@@ -15,7 +15,9 @@ import DailyProgressCard from '../components/DailyProgressCard';
 import Habits from '../components/Habits';
 import QuestCard from '../components/QuestCard';
 import CustomQuestModal from '../components/CustomQuestModal';
+import RerollReasonModal from '../components/RerollReasonModal';
 import { APP_RUNTIME_CHANGED_EVENT, emitHabitCreated, HABIT_RUNTIME_CHANGED_EVENT } from '../lib/habitEvents';
+import type { RerollReasonBucket } from '../lib/rerollReasons';
 
 export default function Dashboard() {
     const { user, profile, refreshProfile } = useAuth();
@@ -32,6 +34,7 @@ export default function Dashboard() {
     const [activeDailyHabitIds, setActiveDailyHabitIds] = useState<string[]>([]);
     const [loggedDailyHabitIds, setLoggedDailyHabitIds] = useState<string[]>([]);
     const [customModalOpen, setCustomModalOpen] = useState(false);
+    const [rerollModalQuest, setRerollModalQuest] = useState<Quest | null>(null);
 
     const fetchData = useCallback(async (options?: { force?: boolean }) => {
         if (!user) return;
@@ -135,13 +138,20 @@ export default function Dashboard() {
         }
     };
 
-    const handleRerollDaily = async (quest: Quest) => {
+    const handleOpenRerollDaily = (quest: Quest) => {
+        if (loadingId || actionId || rerollingId || completedQuestIds.has(quest.id)) return;
+        setRerollModalQuest(quest);
+    };
+
+    const handleConfirmRerollDaily = async (reasonBucket: RerollReasonBucket, reasonDetail?: string) => {
+        if (!rerollModalQuest) return;
+
         try {
-            setRerollingId(quest.id);
-            const result = await rerollDailyQuest(quest.id);
+            setRerollingId(rerollModalQuest.id);
+            const result = await rerollDailyQuest(rerollModalQuest.id, reasonBucket, reasonDetail);
 
             setQuests((prev) => {
-                const withoutOldQuest = prev.filter((existingQuest) => existingQuest.id !== quest.id);
+                const withoutOldQuest = prev.filter((existingQuest) => existingQuest.id !== rerollModalQuest.id);
                 if (!result.new_quest) return withoutOldQuest;
 
                 return [...withoutOldQuest, result.new_quest].sort((a, b) =>
@@ -155,6 +165,7 @@ export default function Dashboard() {
             setActionToast({ msg: error.message || 'Failed to reroll daily quest', type: 'error' });
             setTimeout(() => setActionToast(null), 3000);
         } finally {
+            setRerollModalQuest(null);
             setRerollingId(null);
         }
     };
@@ -234,9 +245,6 @@ export default function Dashboard() {
                                     </span>
                                 </div>
                             </div>
-                            <p className="mt-2 text-[11px] text-slate-500">
-                                Earn gold from quests. Spend it in Bazaar rewards and magical goods.
-                            </p>
                         </div>
                     </div>
 
@@ -297,7 +305,7 @@ export default function Dashboard() {
                                     isActionLoading={actionId === quest.id || rerollingId === quest.id}
                                     onComplete={handleCompleteQuest}
                                     onMakeHabit={handleMakeHabit}
-                                    onRerollDaily={handleRerollDaily}
+                                    onRerollDaily={handleOpenRerollDaily}
                                     remainingDailyRerolls={remainingDailyRerolls}
                                     disableActions={!!loadingId || !!actionId || !!rerollingId}
                                 />
@@ -332,6 +340,18 @@ export default function Dashboard() {
                     console.error(message);
                     showToast(message, 'error');
                 }}
+            />
+
+            <RerollReasonModal
+                open={!!rerollModalQuest}
+                quest={rerollModalQuest}
+                remainingAlternatives={remainingDailyRerolls}
+                loading={!!rerollingId}
+                onClose={() => {
+                    if (rerollingId) return;
+                    setRerollModalQuest(null);
+                }}
+                onConfirm={handleConfirmRerollDaily}
             />
         </div>
     );

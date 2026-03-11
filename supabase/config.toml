@@ -37,3 +37,7 @@ verify_jwt = false
 [functions.settle-daily]
 enabled = true
 verify_jwt = false
+
+[functions.use-inventory-item]
+enabled = true
+verify_jwt = false

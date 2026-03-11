@@ -22,6 +22,13 @@ type RecentDailyQuestRow = {
     title: string | null;
 };
 
+type QuestFeedbackRow = {
+    quest_title: string;
+    feedback_type: string;
+    reason_bucket: string;
+    reason_detail: string | null;
+};
+
 function buildRecentDayKeys(days: number, now = new Date()): string[] {
     const keys: string[] = [];
     let cursor = getAppDayKey(now);
@@ -57,7 +64,7 @@ export async function buildRecentQuestBehaviorContext(
     const todayKey = dayKeys[0];
     const oldestKey = dayKeys[dayKeys.length - 1];
 
-    const [{ data: historyRows }, { data: recentDailyQuestRows }] = await Promise.all([
+    const [{ data: historyRows }, { data: recentDailyQuestRows }, { data: feedbackRows }] = await Promise.all([
         supabase
             .from("user_quests")
             .select("quest_date, is_completed, skip_reason, quests(title, quest_type, stat_affected)")
@@ -74,9 +81,16 @@ export async function buildRecentQuestBehaviorContext(
             .eq("is_custom", false)
             .order("created_at", { ascending: false })
             .limit(24),
+        supabase
+            .from("quest_feedback")
+            .select("quest_title, feedback_type, reason_bucket, reason_detail")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(24),
     ]);
 
     const rows = (historyRows ?? []) as QuestHistoryRow[];
+    const feedback = (feedbackRows ?? []) as QuestFeedbackRow[];
     const recentDailyTitles = Array.from(
         new Set(
             ((recentDailyQuestRows ?? []) as RecentDailyQuestRow[])
@@ -124,10 +138,19 @@ export async function buildRecentQuestBehaviorContext(
         .slice(0, 3)
         .map(([stat, count]) => `${stat} x${count}`);
 
+    const recentFeedbackSummary = feedback
+        .slice(0, 5)
+        .map((entry) => {
+            const detail = entry.reason_detail?.trim();
+            const suffix = detail ? `: ${detail}` : "";
+            return `${entry.quest_title} [${entry.feedback_type}/${entry.reason_bucket}]${suffix}`;
+        });
+
     const context = [
         `\n\nRECENT APP-DAY BEHAVIOR (last ${appDays} app days, reset at 03:00):`,
         ...daySummaries,
         `- Successful recent stat lanes: ${successfulStats.length > 0 ? successfulStats.join(", ") : "none yet"}`,
+        `- Recent reroll/regeneration feedback to respect: ${recentFeedbackSummary.length > 0 ? recentFeedbackSummary.join(" | ") : "none yet"}`,
         `- Recently generated daily titles to avoid repeating too closely: ${recentDailyTitles.length > 0 ? recentDailyTitles.join(", ") : "none yet"}`,
         "- Use this history to create novelty: build on what the user actually completed, avoid what they skipped or disliked, and do not recycle the same daily titles unless there is no better fit.",
     ].join("\n");

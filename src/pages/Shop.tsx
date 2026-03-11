@@ -2,50 +2,41 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import AppHeader from '../components/AppHeader';
 import { supabase } from '../lib/supabase';
-import { buyItem, generateShopItems, purchaseShopItem } from '../lib/api';
-import type { ShopItem, ShopCategory } from '../lib/database.types';
+import { buyItem, generateShopItems, purchaseShopItem, useInventoryItem } from '../lib/api';
+import type { InventoryItem, ShopItem, ShopCategory } from '../lib/database.types';
 import { clearPersistedShopOffers, readPersistedShopOffers, writePersistedShopOffers } from '../lib/shopOfferCache';
 import {
     Coins, Heart, Star, Shield, AlertCircle, Check,
     Coffee, Tv, Sparkles, BookOpen, Dumbbell, Map, Gamepad2, Users,
-    RefreshCw, Clock
+    RefreshCw, Clock, Package
 } from 'lucide-react';
+import { STATIC_SHOP_ITEM_LIST, type StaticShopItemKey } from '../lib/shopCatalog';
+import {
+    getInventoryCacheKey,
+    readCachedValue,
+    STATIC_VIEW_CACHE_TTL_MS,
+    writeCachedValue,
+} from '../lib/viewCache';
 
-type StaticItem = {
-    id: string;
-    title: string;
-    description: string;
-    cost: number;
+type StaticItemStyle = {
     icon: React.ReactNode;
     color: string;
 };
 
-const STATIC_ITEMS: StaticItem[] = [
-    {
-        id: 'health_potion',
-        title: 'Health Potion',
-        description: 'Restores 50 HP immediately. Drink wisely before you succumb to exhaustion.',
-        cost: 100,
+const STATIC_ITEM_STYLES: Record<StaticShopItemKey, StaticItemStyle> = {
+    health_potion: {
         icon: <Heart className="w-8 h-8 text-red-500" fill="currentColor" />,
-        color: 'from-red-900/40 to-slate-900 border-red-900/50 hover:border-red-500/50'
+        color: 'from-red-900/40 to-slate-900 border-red-900/50 hover:border-red-500/50',
     },
-    {
-        id: 'xp_scroll',
-        title: 'Scroll of Experience',
-        description: 'Instantly grants +250 XP. A magical shortcut to your next level.',
-        cost: 300,
+    xp_scroll: {
         icon: <Star className="w-8 h-8 text-amber-500" fill="currentColor" />,
-        color: 'from-amber-900/40 to-slate-900 border-amber-900/50 hover:border-amber-500/50'
+        color: 'from-amber-900/40 to-slate-900 border-amber-900/50 hover:border-amber-500/50',
     },
-    {
-        id: 'streak_freeze',
-        title: 'Streak Freeze',
-        description: 'Protects your active streak and HP from dropping for one missed day. Max 3.',
-        cost: 500,
+    streak_freeze: {
         icon: <Shield className="w-8 h-8 text-blue-400" fill="currentColor" />,
-        color: 'from-blue-900/40 to-slate-900 border-blue-900/50 hover:border-blue-500/50'
-    }
-];
+        color: 'from-blue-900/40 to-slate-900 border-blue-900/50 hover:border-blue-500/50',
+    },
+};
 
 // Helper to map dynamic categories to gorgeous styles
 const CATEGORY_STYLES: Record<ShopCategory, { icon: React.ReactNode; color: string; label: string }> = {
@@ -64,10 +55,12 @@ export default function Shop() {
 
     const [gold, setGold] = useState<number>(0);
     const [dynamicItems, setDynamicItems] = useState<ShopItem[]>([]);
+    const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
 
     const [loading, setLoading] = useState(true);
     const [generating, setGenerating] = useState(false);
     const [buyingId, setBuyingId] = useState<string | null>(null);
+    const [usingInventoryId, setUsingInventoryId] = useState<string | null>(null);
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
     useEffect(() => {
@@ -79,8 +72,17 @@ export default function Shop() {
     useEffect(() => {
         if (!user) return;
         const cachedOffers = readPersistedShopOffers(user.id);
+        const cachedInventory = readCachedValue<InventoryItem[]>(getInventoryCacheKey(user.id));
+
         if (cachedOffers) {
             setDynamicItems(cachedOffers);
+        }
+
+        if (cachedInventory.hit) {
+            setInventoryItems(cachedInventory.value);
+        }
+
+        if (cachedOffers && cachedInventory.hit) {
             setLoading(false);
             return;
         }
@@ -91,23 +93,34 @@ export default function Shop() {
     const fetchData = async () => {
         setLoading(true);
 
-        // Fetch Dynamic Items that are not expired and not purchased.
         const nowIso = new Date().toISOString();
-        const { data: items } = await supabase
-            .from('shop_items')
-            .select('*')
-            .eq('user_id', user!.id)
-            .eq('is_purchased', false)
-            .gt('expires_at', nowIso)
-            .order('created_at', { ascending: true })
-            .order('cost', { ascending: true });
+        const [{ data: items }, { data: inventoryRows }] = await Promise.all([
+            supabase
+                .from('shop_items')
+                .select('*')
+                .eq('user_id', user!.id)
+                .eq('is_purchased', false)
+                .gt('expires_at', nowIso)
+                .order('created_at', { ascending: true })
+                .order('cost', { ascending: true }),
+            supabase
+                .from('inventory_items')
+                .select('*')
+                .eq('user_id', user!.id)
+                .eq('is_redeemed', false)
+                .order('created_at', { ascending: false }),
+        ]);
 
         if (items && items.length > 0) {
             const nextItems = writePersistedShopOffers(user!.id, items as ShopItem[]);
             setDynamicItems(nextItems);
         } else {
-            handleGenerateShop();
+            await handleGenerateShop();
         }
+
+        const nextInventory = (inventoryRows as InventoryItem[] | null) ?? [];
+        setInventoryItems(nextInventory);
+        writeCachedValue(getInventoryCacheKey(user!.id), nextInventory, STATIC_VIEW_CACHE_TTL_MS);
 
         setLoading(false);
     };
@@ -133,7 +146,46 @@ export default function Shop() {
         setTimeout(() => setToast(null), 3000);
     };
 
-    const handleBuyStatic = async (item: StaticItem) => {
+    const upsertInventoryItem = (inventoryItem?: InventoryItem | null) => {
+        if (!inventoryItem) return;
+        setInventoryItems((prev) => {
+            const nextItems = [
+                inventoryItem,
+                ...prev.filter((existingItem) => existingItem.id !== inventoryItem.id),
+            ];
+            if (user) {
+                writeCachedValue(getInventoryCacheKey(user.id), nextItems, STATIC_VIEW_CACHE_TTL_MS);
+            }
+            return nextItems;
+        });
+    };
+
+    const getInventoryActionLabel = (item: InventoryItem) => {
+        if (item.source_type === 'dynamic') return 'Redeem';
+        if (item.item_key === 'health_potion') return 'Drink';
+        if (item.item_key === 'xp_scroll') return 'Use Scroll';
+        if (item.item_key === 'streak_freeze') return 'Activate';
+        return 'Use';
+    };
+
+    const getInventoryVisual = (item: InventoryItem) => {
+        if (item.source_type === 'static' && item.item_key && item.item_key in STATIC_ITEM_STYLES) {
+            return {
+                icon: STATIC_ITEM_STYLES[item.item_key as StaticShopItemKey].icon,
+                color: STATIC_ITEM_STYLES[item.item_key as StaticShopItemKey].color,
+                label: item.item_key === 'streak_freeze' ? 'Ward' : 'Supply',
+            };
+        }
+
+        const category = (item.category as ShopCategory | null) ?? 'entertainment';
+        const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.entertainment;
+        return style;
+    };
+
+    const handleBuyStatic = async (itemId: StaticShopItemKey) => {
+        const item = STATIC_SHOP_ITEM_LIST.find((entry) => entry.id === itemId);
+        if (!item) return;
+
         if (gold < item.cost) {
             showToast("Not enough gold, hero! Complete more quests.", "error");
             return;
@@ -142,8 +194,9 @@ export default function Shop() {
         setBuyingId(item.id);
         try {
             const res = await buyItem(item.id);
-            const nextGold = gold - item.cost;
+            const nextGold = typeof res.gold_remaining === 'number' ? res.gold_remaining : gold - item.cost;
             setGold(nextGold);
+            upsertInventoryItem(res.inventory_item ?? null);
             await refreshProfile();
             showToast(res.message, 'success');
         } catch (error: any) {
@@ -161,11 +214,11 @@ export default function Shop() {
 
         setBuyingId(item.id);
         try {
-            await purchaseShopItem(item.id);
-            const nextGold = gold - item.cost;
+            const res = await purchaseShopItem(item.id);
+            const nextGold = typeof res.gold_remaining === 'number' ? res.gold_remaining : gold - item.cost;
             setGold(nextGold);
-            showToast(`You bought: ${item.title}! Enjoy your reward!`, 'success');
-            // Remove from list
+            upsertInventoryItem(res.inventory_item ?? null);
+            showToast(res.message || `You bought: ${item.title}. It is now in your inventory.`, 'success');
             setDynamicItems(prev => {
                 const nextItems = prev.filter(i => i.id !== item.id);
                 if (user && nextItems.length > 0) {
@@ -181,6 +234,31 @@ export default function Shop() {
             showToast(error.message || "Failed to purchase item.", "error");
         }
         setBuyingId(null);
+    };
+
+    const handleUseInventoryItem = async (item: InventoryItem) => {
+        setUsingInventoryId(item.id);
+        try {
+            const res = await useInventoryItem(item.id);
+            if (res.inventory_item) {
+                upsertInventoryItem(res.inventory_item);
+            } else {
+                setInventoryItems((prev) => {
+                    const nextItems = prev.filter((inventoryEntry) => inventoryEntry.id !== item.id);
+                    if (user) {
+                        writeCachedValue(getInventoryCacheKey(user.id), nextItems, STATIC_VIEW_CACHE_TTL_MS);
+                    }
+                    return nextItems;
+                });
+            }
+            await refreshProfile();
+            showToast(res.message, 'success');
+        } catch (error: any) {
+            console.error('Inventory use failed:', error);
+            showToast(error.message || 'Failed to use inventory item.', 'error');
+        } finally {
+            setUsingInventoryId(null);
+        }
     };
 
     const formatDaysLeft = (isoString: string) => {
@@ -217,6 +295,73 @@ export default function Shop() {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 pt-5 pb-[calc(8rem+env(safe-area-inset-bottom))] space-y-8">
+
+                <section className="space-y-4">
+                    <div className="flex items-center justify-between px-2">
+                        <h2 className="font-heading text-lg text-white flex items-center gap-2">
+                            <Package className="w-5 h-5 text-amber-400" />
+                            Inventory
+                        </h2>
+                        <span className="text-xs text-slate-500">
+                            Bought items stay here until you use or redeem them.
+                        </span>
+                    </div>
+
+                    {inventoryItems.length > 0 ? (
+                        <div className="grid grid-cols-1 gap-4">
+                            {inventoryItems.map((item) => {
+                                const style = getInventoryVisual(item);
+                                const isUsing = usingInventoryId === item.id;
+                                const quantityLabel = item.quantity > 1 ? `x${item.quantity}` : null;
+
+                                return (
+                                    <div key={item.id} className={`bg-gradient-to-br to-slate-900 ${style.color} border rounded-xl p-4 flex flex-col gap-3 transition-all duration-300 relative overflow-hidden group`}>
+                                        <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-white/10 transition-colors" />
+
+                                        <div className="flex gap-4 relative z-10">
+                                            <div className="w-14 h-14 rounded-lg bg-slate-950/50 border border-white/10 flex items-center justify-center shrink-0 shadow-inner">
+                                                {style.icon}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="mb-1 flex items-start justify-between gap-2">
+                                                    <h3 className="line-clamp-2 pr-1 font-heading text-lg leading-tight text-white">{item.title}</h3>
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        {quantityLabel && (
+                                                            <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-300">
+                                                                {quantityLabel}
+                                                            </span>
+                                                        )}
+                                                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-700">
+                                                            {item.source_type === 'dynamic' ? 'Reward' : 'Item'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <p className="line-clamp-3 text-sm leading-snug text-slate-400">{item.description}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between pt-2 border-t border-white/5 relative z-10">
+                                            <div className="text-[11px] text-slate-500">
+                                                {item.source_type === 'dynamic' ? 'Bought from the Bazaar and stored for later.' : 'Stored safely until you choose to use it.'}
+                                            </div>
+                                            <button
+                                                onClick={() => void handleUseInventoryItem(item)}
+                                                disabled={isUsing}
+                                                className="px-5 py-2 rounded-lg font-heading uppercase tracking-wide text-xs transition-colors flex items-center justify-center min-w-[110px] bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-glow-gold disabled:bg-slate-700 disabled:text-slate-500 disabled:shadow-none"
+                                            >
+                                                {isUsing ? <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" /> : getInventoryActionLabel(item)}
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="text-center p-6 border border-slate-800 rounded-xl bg-slate-900/30">
+                            <p className="text-slate-500 text-sm">Your inventory is empty. Buy something now, use it later.</p>
+                        </div>
+                    )}
+                </section>
 
                 {/* DYNAMIC REAL-LIFE REWARDS */}
                 <section className="space-y-4">
@@ -282,7 +427,7 @@ export default function Shop() {
                                                     : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                                                     }`}
                                             >
-                                                {isBuying ? <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" /> : 'Claim'}
+                                                {isBuying ? <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" /> : 'Buy'}
                                             </button>
                                         </div>
                                     </div>
@@ -305,15 +450,16 @@ export default function Shop() {
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 opacity-90">
-                        {STATIC_ITEMS.map(item => {
+                        {STATIC_SHOP_ITEM_LIST.map(item => {
+                            const style = STATIC_ITEM_STYLES[item.id];
                             const canAfford = gold >= item.cost;
                             const isBuying = buyingId === item.id;
 
                             return (
-                                <div key={item.id} className={`bg-gradient-to-br ${item.color} border rounded-xl p-4 flex flex-col gap-3 transition-all duration-300 relative overflow-hidden group`}>
+                                <div key={item.id} className={`bg-gradient-to-br ${style.color} border rounded-xl p-4 flex flex-col gap-3 transition-all duration-300 relative overflow-hidden group`}>
                                     <div className="flex gap-4 relative z-10">
                                         <div className="w-12 h-12 rounded-lg bg-slate-950/50 border border-white/10 flex items-center justify-center shrink-0 shadow-inner group-hover:scale-110 transition-transform duration-300">
-                                            {item.icon}
+                                            {style.icon}
                                         </div>
                                         <div className="flex-1">
                                             <h3 className="font-heading text-md text-white mb-0.5">{item.title}</h3>
@@ -327,7 +473,7 @@ export default function Shop() {
                                             {item.cost}
                                         </div>
                                         <button
-                                            onClick={() => handleBuyStatic(item)}
+                                            onClick={() => handleBuyStatic(item.id)}
                                             disabled={!canAfford || isBuying}
                                             className={`px-4 py-1.5 rounded-lg font-heading uppercase tracking-wide text-xs transition-colors flex items-center justify-center min-w-[80px] ${canAfford
                                                 ? 'bg-slate-700 hover:bg-slate-600 text-white'

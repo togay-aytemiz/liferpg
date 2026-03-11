@@ -125,6 +125,9 @@ export interface Habit {
     is_good: boolean;
     stat_affected: StatCategory;
     frequency: 'daily' | 'weekly' | 'monthly';
+    xp_reward: number;
+    gold_reward: number;
+    stat_points: number;
     is_active: boolean;
     created_at: string;
 }
@@ -148,6 +151,37 @@ export interface ShopItem {
     expires_at: string;
     is_purchased: boolean;
     created_at: string;
+}
+
+export interface QuestFeedback {
+    id: string;
+    user_id: string;
+    quest_id: string | null;
+    quest_title: string;
+    quest_type: QuestType;
+    feedback_type: 'reroll' | 'skip' | 'regenerate';
+    reason_bucket: string;
+    reason_detail: string | null;
+    app_day_key: string;
+    created_at: string;
+}
+
+export interface InventoryItem {
+    id: string;
+    user_id: string;
+    source_type: 'static' | 'dynamic';
+    source_item_id: string | null;
+    item_key: string | null;
+    title: string;
+    description: string | null;
+    category: string | null;
+    quantity: number;
+    is_consumable: boolean;
+    is_redeemed: boolean;
+    metadata: Record<string, unknown>;
+    redeemed_at: string | null;
+    created_at: string;
+    updated_at: string;
 }
 
 // -- Database schema mapping (for Supabase client generic) --
@@ -205,10 +239,20 @@ export interface Database {
                 Insert: Partial<HabitLog>;
                 Update: Partial<HabitLog>;
             };
+            quest_feedback: {
+                Row: QuestFeedback;
+                Insert: Partial<QuestFeedback>;
+                Update: Partial<QuestFeedback>;
+            };
             shop_items: {
                 Row: ShopItem;
                 Insert: Partial<ShopItem>;
                 Update: Partial<ShopItem>;
+            };
+            inventory_items: {
+                Row: InventoryItem;
+                Insert: Partial<InventoryItem>;
+                Update: Partial<InventoryItem>;
             };
         };
         Enums: {

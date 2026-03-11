@@ -15,10 +15,10 @@ import {
 import { Plus, Activity } from 'lucide-react';
 import { getCurrentAppDayWindow } from '../lib/appDay';
 import { invalidateQuestRuntime } from '../lib/questRuntime';
-import { GOOD_HABIT_STAT_GAIN, GOOD_HABIT_XP_REWARD } from '../lib/habitGameplay';
+import { getSuggestedHabitRewards } from '../lib/habitGameplay';
 
 export default function Habits() {
-    const { user } = useAuth();
+    const { user, profile } = useAuth();
     const [habits, setHabits] = useState<Habit[]>([]);
     const [loggedTodayIds, setLoggedTodayIds] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(true);
@@ -127,6 +127,7 @@ export default function Habits() {
                 is_good: isGood,
                 stat_affected: stat,
                 frequency: frequency,
+                ...getSuggestedHabitRewards({ frequency, isGood, level: profile?.level }),
             } as any)
             .select()
             .single();
@@ -163,7 +164,7 @@ export default function Habits() {
                 if (result.died) {
                     showToast("You died from a bad habit! HP restored, but you lost half your gold and your streak was reset.", "error");
                 } else if (habit.is_good) {
-                    showToast(`+${GOOD_HABIT_XP_REWARD} XP | +${GOOD_HABIT_STAT_GAIN} ${habit.stat_affected}`, "success");
+                    showToast(`+${result.xp_awarded ?? habit.xp_reward} XP | +${result.gold_awarded ?? habit.gold_reward} Gold | +${result.stat_points_awarded ?? habit.stat_points} ${habit.stat_affected}`, "success");
                 } else {
                     showToast(`-5 HP | -2 Gold | -1 ${habit.stat_affected}`, "warning");
                 }

@@ -27,6 +27,8 @@ All notable changes to this project will be documented in this file.
 - **Custom Quests & Avoidance Goals:** Users can now click the `+` icon to add manual, custom quests. They simply write what they want to do (e.g. "Do laundry") or what they want to AVOID (e.g. "No fast food today"). The LLM evaluates the prompt, flags avoidance challenges as Willpower/Strength obstacles, and dynamically assigns difficulty, XP, Gold, and stat rewards.
 - **AI Robustness:** OpenAI retry with exponential backoff (3 attempts), response validation with field whitelisting, duplicate completion guard
 - **Quest Chains:** Implemented multi-step connected quests (2-4 steps) that unlock sequentially. Chained quests follow boss battles, starting locked/ghosted in the UI and automatically activating upon completion of the previous step. Includes frontend toast notifications for step unlocks.
+- **Reroll Feedback Memory:** Daily rerolls now collect a structured reason plus optional custom note, store that feedback in `quest_feedback`, and feed it into future LLM generation/regeneration so the system can react to rejected dailies.
+- **Persistent Bazaar Inventory:** Added `inventory_items` plus a new `use-inventory-item` flow so Bazaar purchases are owned persistently, can stack, and are consumed or redeemed later instead of applying immediately on purchase.
 
 ### Changed
 - Replaced Vite boilerplate with RPG-themed application
@@ -72,6 +74,11 @@ All notable changes to this project will be documented in this file.
 - Quest gold rewards now respect a type+difficulty minimum, so old hard bosses no longer surface obviously too-low values such as `+5 Gold`.
 - Habit cards no longer show a second `Done Today` pill when the completion checkbox already indicates that state.
 - Daily streak and daily-objective reads now share one `03:00 -> 03:00` app-day helper across frontend HUDs and backend functions instead of mixing UTC calendar days with local reset messaging.
+- Bazaar purchases now route through an inventory ledger: static magical goods are stored for later use, personalized offers are bought into inventory for later redemption, and the Bazaar screen includes an inventory section with use/redeem actions.
+- Custom habit creation now assigns profile-aware XP/gold/stat rewards, and good habits surface gold alongside XP so the habit loop participates in the same economy as quests.
+- Character stat lanes now use dedicated icons and tuned accent colors so the stat block reads more like an RPG attribute panel.
+- Custom quest forging now includes player level, stats, routine, and preference context before the AI assigns difficulty, XP, gold, and stat impact.
+- Removed the redundant economy helper sentence from the dashboard hero card so the top HUD stays tighter.
 - Quest generation now includes a 7-app-day behavior memory summary (recent completions, skipped quests with reasons, successful stat lanes, and recent generated daily titles) so the LLM can produce more novel daily pools.
 - Added an authenticated per-user daily-settlement fallback on app entry/visibility return, keyed by `last_daily_settlement_day`, so overnight penalties and daily rotation still happen even if the background cron is delayed or missing.
 
@@ -120,3 +127,6 @@ All notable changes to this project will be documented in this file.
 - **03:00 Streak Drift:** Fixed streak progression and daily reads using raw UTC day windows even though the product reset is nightly `03:00`. Quest completion, skip/reroll accounting, daily habit progress, and nightly streak checks now all use the same app-day key, so a second cleared app day increments the streak instead of staying stuck at `1`.
 - **Silent Overnight Penalty Misses:** Fixed the case where a user could miss the 80% daily threshold and still see no HP/streak consequence because the nightly job had not run. Settlement is now idempotent per app day and can run on authenticated app entry as a fallback, so missed schedules no longer suppress penalties.
 - **Repetitive Daily Pools:** Fixed quest generation relying too heavily on routine text alone. The LLM now sees the last 7 app days of completions, skips with reasons, and recent generated daily titles, which reduces stale repetitions and makes new pools react to actual user behavior.
+- **Missing Daily Reroll Context:** Fixed daily rerolls being opaque to the AI system. Rerolls now require a user-facing reason selection, store that feedback, and use a broader reserve search so "no rerolls left" is based on the real alternate pool instead of an overly narrow latest-batch slice.
+- **Instant Bazaar Consumption / No Ownership Model:** Fixed Bazaar items being applied immediately with no sense of ownership or storage. Purchased items now persist in inventory until the player explicitly uses or redeems them.
+- **Habit Rewards Detached From Economy:** Fixed good habits only contributing XP while the rest of the product used a gold-backed Bazaar economy. Good habits now pay gold too, and custom-created habits receive tuned starter rewards instead of flat generic values.

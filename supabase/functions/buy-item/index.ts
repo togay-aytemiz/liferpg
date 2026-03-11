@@ -1,16 +1,13 @@
-// supabase/functions/buy-item/index.ts
-// Edge Function: Handles purchasing items from the Shop with gold.
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { createSupabaseAdmin, createSupabaseClient, corsHeaders } from "../_shared/supabase.ts";
+import { STATIC_SHOP_ITEMS } from "../../../src/lib/shopCatalog.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+type InventoryRow = {
+  id: string;
+  quantity: number;
 };
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -24,16 +21,11 @@ serve(async (req) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "", // Need service key to bypass RLS for secure gold updates
-      {
-        global: { headers: { Authorization: authHeader } },
-      }
-    );
+    const supabase = createSupabaseClient(authHeader);
+    const supabaseAdmin = createSupabaseAdmin();
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
 
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
@@ -41,19 +33,19 @@ serve(async (req) => {
       });
     }
 
-    // Parse request body
-    const { item_id } = await req.json();
-    if (!item_id) {
+    const { item_id, item_source } = await req.json();
+    if (!item_id || typeof item_id !== "string") {
       return new Response(JSON.stringify({ error: "item_id is required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Fetch user profile and current gold
-    const { data: profile, error: profileError } = await supabase
+    const sourceType = item_source === "dynamic" ? "dynamic" : "static";
+
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from("profiles")
-      .select("gold, hp, max_hp, xp, level, streak_freezes")
+      .select("gold")
       .eq("id", user.id)
       .single();
 
@@ -64,85 +56,216 @@ serve(async (req) => {
       });
     }
 
-    // Define items
-    const ITEMS: Record<string, { cost: number; title: string; onApply: (p: any) => Promise<any> }> = {
-      "health_potion": {
-        title: "Health Potion",
-        cost: 100,
-        onApply: async (p) => {
-          const newHP = Math.min(p.hp + 50, p.max_hp);
-          return { hp: newHP };
-        }
-      },
-      "xp_scroll": {
-        title: "Scroll of Experience",
-        cost: 300,
-        onApply: async (p) => {
-          return { xp: p.xp + 250 }; // Need to handle leveling up below
-        }
-      },
-      "streak_freeze": {
-        title: "Streak Freeze",
-        cost: 500,
-        onApply: async (p) => {
-          return { streak_freezes: p.streak_freezes + 1 };
-        }
+    if (sourceType === "static") {
+      const staticItem = STATIC_SHOP_ITEMS[item_id as keyof typeof STATIC_SHOP_ITEMS];
+      if (!staticItem) {
+        return new Response(JSON.stringify({ error: "Invalid item variant" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
-    };
 
-    const item = ITEMS[item_id];
-    if (!item) {
-      return new Response(JSON.stringify({ error: "Invalid item variant" }), {
-        status: 400,
+      if (profile.gold < staticItem.cost) {
+        return new Response(JSON.stringify({ error: "Not enough gold" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: existingInventory } = await supabaseAdmin
+        .from("inventory_items")
+        .select("id, quantity")
+        .eq("user_id", user.id)
+        .eq("source_type", "static")
+        .eq("item_key", staticItem.id)
+        .eq("is_redeemed", false)
+        .maybeSingle();
+
+      const nextGold = profile.gold - staticItem.cost;
+      const nowIso = new Date().toISOString();
+
+      const { error: profileUpdateError } = await supabaseAdmin
+        .from("profiles")
+        .update({ gold: nextGold })
+        .eq("id", user.id);
+
+      if (profileUpdateError) {
+        throw profileUpdateError;
+      }
+
+      let inventoryItem: Record<string, unknown> | null = null;
+
+      try {
+        if (existingInventory) {
+          const { data: updatedInventory, error: inventoryError } = await supabaseAdmin
+            .from("inventory_items")
+            .update({ quantity: (existingInventory as InventoryRow).quantity + 1, updated_at: nowIso })
+            .eq("id", (existingInventory as InventoryRow).id)
+            .select("*")
+            .single();
+
+          if (inventoryError) throw inventoryError;
+          inventoryItem = updatedInventory as Record<string, unknown>;
+        } else {
+          const { data: insertedInventory, error: inventoryError } = await supabaseAdmin
+            .from("inventory_items")
+            .insert({
+              user_id: user.id,
+              source_type: "static",
+              item_key: staticItem.id,
+              title: staticItem.title,
+              description: staticItem.description,
+              category: staticItem.inventoryCategory,
+              quantity: 1,
+              is_consumable: staticItem.isConsumable,
+              is_redeemed: false,
+              metadata: { inventory_use_label: staticItem.inventoryUseLabel },
+              updated_at: nowIso,
+            })
+            .select("*")
+            .single();
+
+          if (inventoryError) throw inventoryError;
+          inventoryItem = insertedInventory as Record<string, unknown>;
+        }
+      } catch (inventoryError) {
+        await supabaseAdmin
+          .from("profiles")
+          .update({ gold: profile.gold })
+          .eq("id", user.id);
+        throw inventoryError;
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        message: `${staticItem.title} added to your inventory. Use it whenever you want.`,
+        gold_remaining: nextGold,
+        inventory_item: inventoryItem,
+      }), {
+        status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Check if user has enough gold
-    if (profile.gold < item.cost) {
+    const { data: dynamicItem, error: dynamicItemError } = await supabaseAdmin
+      .from("shop_items")
+      .select("id, title, description, cost, category, expires_at, is_purchased")
+      .eq("id", item_id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (dynamicItemError || !dynamicItem) {
+      return new Response(JSON.stringify({ error: "Item not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (dynamicItem.is_purchased) {
+      return new Response(JSON.stringify({ error: "Item already purchased" }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (new Date(dynamicItem.expires_at).getTime() <= Date.now()) {
+      return new Response(JSON.stringify({ error: "This offer has already expired" }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (profile.gold < dynamicItem.cost) {
       return new Response(JSON.stringify({ error: "Not enough gold" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Begin transaction logic
-    const newGold = profile.gold - item.cost;
-    const updates = await item.onApply(profile);
-    updates.gold = newGold;
+    const nextGold = profile.gold - dynamicItem.cost;
+    const nowIso = new Date().toISOString();
 
-    // Execute update
-    const { error: updateError } = await supabase
+    const { error: deductGoldError } = await supabaseAdmin
       .from("profiles")
-      .update(updates)
+      .update({ gold: nextGold })
       .eq("id", user.id);
 
-    if (updateError) throw updateError;
+    if (deductGoldError) throw deductGoldError;
 
-    // Note: If they bought XP, they might level up. The frontend handles level ups based on XP thresholds usually,
-    // or we could trigger generate-rewards here if we wanted to make fully authoritative backend leveling.
-    // For now, we return the new state and let frontend handle visual level ups exactly like complete-quest does.
+    const { error: markPurchasedError } = await supabaseAdmin
+      .from("shop_items")
+      .update({ is_purchased: true })
+      .eq("id", dynamicItem.id);
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: `Purchased ${item.title} successfully.`,
-        updates
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (markPurchasedError) throw markPurchasedError;
+
+    const { data: existingInventory } = await supabaseAdmin
+      .from("inventory_items")
+      .select("id, quantity")
+      .eq("user_id", user.id)
+      .eq("source_type", "dynamic")
+      .eq("title", dynamicItem.title)
+      .eq("description", dynamicItem.description)
+      .eq("category", dynamicItem.category)
+      .eq("is_redeemed", false)
+      .maybeSingle();
+
+    let inventoryItem: Record<string, unknown> | null = null;
+
+    try {
+      if (existingInventory) {
+        const { data: updatedInventory, error: inventoryError } = await supabaseAdmin
+          .from("inventory_items")
+          .update({ quantity: (existingInventory as InventoryRow).quantity + 1, updated_at: nowIso })
+          .eq("id", (existingInventory as InventoryRow).id)
+          .select("*")
+          .single();
+
+        if (inventoryError) throw inventoryError;
+        inventoryItem = updatedInventory as Record<string, unknown>;
+      } else {
+        const { data: insertedInventory, error: inventoryError } = await supabaseAdmin
+          .from("inventory_items")
+          .insert({
+            user_id: user.id,
+            source_type: "dynamic",
+            source_item_id: dynamicItem.id,
+            item_key: null,
+            title: dynamicItem.title,
+            description: dynamicItem.description,
+            category: dynamicItem.category,
+            quantity: 1,
+            is_consumable: false,
+            is_redeemed: false,
+            metadata: { expires_at: dynamicItem.expires_at },
+            updated_at: nowIso,
+          })
+          .select("*")
+          .single();
+
+        if (inventoryError) throw inventoryError;
+        inventoryItem = insertedInventory as Record<string, unknown>;
       }
-    );
+    } catch (inventoryError) {
+      await supabaseAdmin.from("profiles").update({ gold: profile.gold }).eq("id", user.id);
+      await supabaseAdmin.from("shop_items").update({ is_purchased: false }).eq("id", dynamicItem.id);
+      throw inventoryError;
+    }
 
+    return new Response(JSON.stringify({
+      success: true,
+      message: `${dynamicItem.title} added to your inventory. Redeem it whenever you want.`,
+      gold_remaining: nextGold,
+      inventory_item: inventoryItem,
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (error: any) {
     console.error("buy-item error:", error);
-    return new Response(
-      JSON.stringify({ error: "Internal server error", details: error.message }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return new Response(JSON.stringify({ error: "Internal server error", details: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });

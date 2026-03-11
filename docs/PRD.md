@@ -84,10 +84,12 @@ Tasks are converted into quests.
 - Only **3-5 daily quests** should be active/visible at a time; the rest of the current pool can rotate in on later days without requiring a fresh LLM call every day.
 - Daily quests should support **rerolling** into another option from the current hidden pool instead of using a punitive "skip" action.
 - The daily quest action menu should show how many rerolls remain in the **current daily pool**; if there are no alternates left, the menu should say so explicitly instead of implying a hidden quota.
+- Each daily reroll should collect a **reason bucket** (for example timing, energy, relevance) and optionally a short custom note; that reroll feedback should be persisted and fed back into later LLM generation so the next daily pools can learn from what the user rejected.
 - Within a single generated weekly pool, daily quests must be **title-distinct and micro-action-distinct**; near-duplicate dailies (for example two versions of "Morning Stretch") are invalid.
 - Nightly rotation should prefer dailies that were **not visible the previous day** when the hidden pool has enough alternatives.
 - The generator should bias the daily pool toward **variety across stats/life areas**, and include at least one learning/knowledge-style daily when the user's dislikes and routine do not rule it out.
 - Daily/boss pool generation should receive a **recent behavior summary** covering at least the last 7 app days of completions, skipped quests with reasons, and recently generated daily titles so the LLM can build on what worked and avoid stale repetition.
+- That recent behavior summary should also include **reroll feedback buckets + custom notes** when available, so the model can respond to "why this daily was swapped out" rather than only seeing completions and skips.
 - The frontend should still dedupe legacy dirty daily rows by normalized title as a final UI safeguard, so repeated generated tasks never render twice in the visible list.
 - If the user completes at least **80%** of the currently active daily quests, the day should count as sufficiently cleared for overnight penalty purposes; leftover dailies should not trigger HP/streak punishment on their own.
 - Active **good daily habits** should count toward that same daily objective pool and the same 80% overnight clear rule, so habit-building advances the day instead of living in a disconnected tracker.
@@ -203,6 +205,7 @@ Users define real-life rewards.
 ### 4.8 Habit Tracking System (Continuous Tasks)
 Separate from quests, users can define *Habits* that remain active day-to-day.
 - **Good habits:** (e.g., Drink water, Meditate) - Grants drip-feed XP every time it's clicked.
+- Good habits should also award a small amount of **gold**, so habit-building participates in the same earn/spend economy loop as quests.
 - **Daily good habits count toward daily progress:** Logging a `daily` good habit should clear one daily objective for that day. The system should count each habit at most once per day toward the objective threshold, even if the player logs it multiple times.
 - **Bad habits:** (e.g., Avoid sugar, Limit screen time) - Visualized as standing strength, testing willpower over time.
 - **Frequencies:** Habits can be Daily, Weekly, or Monthly — each with its own tracking cadence.
@@ -214,6 +217,8 @@ Separate from quests, users can define *Habits* that remain active day-to-day.
 - Habit cards should clearly show whether they have already been logged **today**, using a quest-like completed state instead of an ambiguous glowing action.
 - That completed-for-today signal should not be duplicated with an extra status pill if the checkbox/checkmark state already communicates it clearly.
 - Good habits should surface their fixed **XP reward** directly on the card, and the descriptive helper copy should sit under the title like quest-card subtitles.
+- Good habits should also surface their fixed **gold reward** on the card.
+- When the player creates a custom habit directly, the starter reward values should be **profile-aware** (at minimum considering level, habit polarity, and frequency) rather than using one flat reward for everyone.
 
 ### 4.9 Shop & Economy System
 Gold is earned through quests and boss battles. It can be spent in the Shop ("The Bazaar").
@@ -222,6 +227,7 @@ Gold is earned through quests and boss battles. It can be spent in the Shop ("Th
 - **Health Potion:** Restore 50 HP instantly (100 gold).
 - **Scroll of Experience:** +250 XP boost (300 gold).
 - **Streak Freeze:** Protect one missed day from HP/streak loss (500 gold, max 3).
+- Static goods should be added to a **persistent inventory** when purchased; the player decides when to consume them instead of having the effect apply immediately on purchase.
 
 **Dynamic AI-Generated Offers (rotating):**
 - LLM generates 4 personalized real-life rewards based on user's life rhythm and preferences.
@@ -230,6 +236,8 @@ Gold is earned through quests and boss battles. It can be spent in the Shop ("Th
 - Reopening the Bazaar during that active window should reuse the same current offers instead of regenerating them.
 - The active personalized offer set should stay diverse: only one active offer per category at a time.
 - Cost ranges from 100 to 1500 gold.
+- Buying a personalized Bazaar offer should also place it into the player's **inventory** so it can be redeemed later, and the system should allow owning multiple copies of the same offer over time.
+- The Bazaar screen should expose an **Inventory** section where owned items/offers can be consumed or redeemed later.
 - Quests should visibly award gold in the UI so the player understands how Bazaar spending is funded; the app should not hide the earn loop behind a top-right number alone.
 - Quest gold should respect a sensible minimum floor by **quest type + difficulty**, even for legacy/generated records that may carry stale low values.
 
@@ -238,6 +246,7 @@ Gold is earned through quests and boss battles. It can be spent in the Shop ("Th
 ### 4.10 Custom Quests & Avoidance Goals
 Users can create custom AI-evaluated quests via free-text prompt.
 - **Custom Quests:** User describes what they want to do; AI evaluates difficulty, XP, and stat mapping.
+- Custom quest forging should evaluate difficulty, XP, gold, and stat impact with awareness of the player's current **level, stats, life rhythm, and preference context**, so the result feels scaled to the character rather than generic.
 - The same forge modal should be reusable from both Quests and Home, with Home defaulting to `daily` creation.
 - **Avoidance Goals:** Negative-framed quests (e.g., "Don't smoke today", "Spend less than 2 hours on Instagram") that test willpower.
 
@@ -273,7 +282,7 @@ Users can create custom AI-evaluated quests via free-text prompt.
 **3. Character Screen (Character overview)**
 - Level
 - XP progress
-- Stat bars
+- Stat bars with per-stat icons and tuned accent colors
 - Character avatar
 - Bottom-nav labels may use compact abbreviations (`CHAR`), while the page header itself should use the full title `Character`.
 
@@ -416,3 +425,7 @@ The core user loop:
 - **2026-03-11 - App-Day Boundary Ownership:** Streaks, `quest_date`, daily reroll limits, countdown anchoring, and daily-habit progress now all derive from one shared `03:00 -> 03:00` app-day key instead of mixing UTC day splits with local UI assumptions. This keeps streak progression coherent across quest completion, nightly penalties, and daily HUD reads.
 - **2026-03-11 - Recent Behavior Prompt Memory:** Quest-generation prompts now include a short summary of the last 7 app days: completed quests, skipped quests with reasons, successful stat lanes, and recently generated daily titles. This gives the LLM enough behavioral memory to vary pools instead of repeating stale daily patterns.
 - **2026-03-11 - Authenticated Daily Settlement Fallback:** Nightly HP/streak settlement and daily-pool rotation no longer depend only on a server cron. The app can now trigger an idempotent per-user settlement on authenticated entry/visibility return, keyed by `last_daily_settlement_day`, so missed schedules do not silently suppress penalties or daily refreshes.
+- **2026-03-11 - Reroll Feedback as LLM Memory:** Daily rerolls now collect structured reason buckets plus optional custom notes, persist them as `quest_feedback`, and fold recent reroll signals into generation/regeneration prompts. This gives the model a usable rejection-history memory instead of relying only on completion/skip outcomes.
+- **2026-03-11 - Inventory-Based Bazaar Ownership:** Bazaar purchases no longer apply immediately. Static magical goods and dynamic personalized offers are both stored as inventory entries, can stack, and are consumed/redeemed later via a dedicated inventory flow.
+- **2026-03-11 - Profile-Aware Habit / Custom Quest Rewards:** Custom habits now derive XP/gold/stat rewards from frequency, polarity, and current level, while custom quest forging considers current level, stats, life rhythm, and preference context when assigning difficulty and rewards.
+- **2026-03-11 - Hero HUD Copy Reduction:** The dashboard hero card no longer repeats an economy helper sentence under the player name; quest gold is already visible in cards and Bazaar, so the top HUD stays denser and cleaner without repeating that loop.
