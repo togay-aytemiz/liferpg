@@ -34,6 +34,40 @@ type GeneratedShopItem = {
 };
 
 const SHOP_ITEM_COUNT = 4;
+const APP_TIME_ZONE_OFFSET_MINUTES = 180;
+const DAILY_RESET_HOUR = 3;
+const DAY_MS = 86_400_000;
+
+function formatUtcDateKey(date: Date) {
+    return date.toISOString().slice(0, 10);
+}
+
+function getAppDayKey(now = new Date()) {
+    const shiftedMs = now.getTime() + APP_TIME_ZONE_OFFSET_MINUTES * 60_000 - DAILY_RESET_HOUR * 3_600_000;
+    return formatUtcDateKey(new Date(shiftedMs));
+}
+
+function shiftDayKey(dayKey: string, deltaDays: number) {
+    const shifted = new Date(`${dayKey}T00:00:00.000Z`);
+    shifted.setUTCDate(shifted.getUTCDate() + deltaDays);
+    return formatUtcDateKey(shifted);
+}
+
+function getAppDayWindowStart(dayKey: string) {
+    const [year, month, day] = dayKey.split("-").map(Number);
+    const startMs = Date.UTC(year, month - 1, day, DAILY_RESET_HOUR, 0, 0, 0) - APP_TIME_ZONE_OFFSET_MINUTES * 60_000;
+    return new Date(startMs);
+}
+
+function getWeeklyShopExpiresAt(now = new Date()) {
+    const createdDayKey = getAppDayKey(now);
+    const expiryDayKey = shiftDayKey(createdDayKey, 7);
+    return getAppDayWindowStart(expiryDayKey);
+}
+
+function getCanonicalOfferExpiryIso(createdAtIso: string) {
+    return getWeeklyShopExpiresAt(new Date(createdAtIso)).toISOString();
+}
 
 function pickUniqueCategoryItems<T extends { category: string }>(items: T[]) {
     const uniqueItems: T[] = [];
@@ -153,13 +187,34 @@ serve(async (req) => {
         }
 
         const existingItems = (activeItems as ExistingShopItem[] | null) || [];
-        const { uniqueItems: uniqueActiveItems, duplicateItems: duplicateActiveItems } = pickUniqueCategoryItems(existingItems);
+        const nowMs = Date.now();
+        const cadenceExpiredItems = existingItems.filter((item) => new Date(getCanonicalOfferExpiryIso(item.created_at)).getTime() <= nowMs);
+        const cadenceActiveItems = existingItems.filter((item) => new Date(getCanonicalOfferExpiryIso(item.created_at)).getTime() > nowMs);
+        const { uniqueItems: uniqueActiveItemsRaw, duplicateItems: duplicateActiveItems } = pickUniqueCategoryItems(cadenceActiveItems);
+        const uniqueActiveItems = uniqueActiveItemsRaw.map((item) => ({
+            ...item,
+            expires_at: getCanonicalOfferExpiryIso(item.created_at),
+        }));
 
-        if (duplicateActiveItems.length > 0) {
+        const itemsToDelete = [...duplicateActiveItems, ...cadenceExpiredItems];
+
+        if (itemsToDelete.length > 0) {
             await supabase
                 .from("shop_items")
                 .delete()
-                .in("id", duplicateActiveItems.map((item) => item.id));
+                .in("id", itemsToDelete.map((item) => item.id));
+        }
+
+        const expiryNormalizationTargets = uniqueActiveItemsRaw.filter((item) => item.expires_at !== getCanonicalOfferExpiryIso(item.created_at));
+        if (expiryNormalizationTargets.length > 0) {
+            await Promise.all(
+                expiryNormalizationTargets.map((item) =>
+                    supabase
+                        .from("shop_items")
+                        .update({ expires_at: getCanonicalOfferExpiryIso(item.created_at) })
+                        .eq("id", item.id)
+                )
+            );
         }
 
         if (uniqueActiveItems.length > 0) {
@@ -199,10 +254,8 @@ serve(async (req) => {
             );
         }
 
-        // Calculate expires_at: 7 days from now
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 7);
-        const expiresAtIso = expiresAt.toISOString();
+        // Calculate expires_at: next weekly 03:00 app-day boundary after 7 app days
+        const expiresAtIso = getWeeklyShopExpiresAt(new Date()).toISOString();
 
         // Prepare data for insertion
         const itemsToInsert = uniqueGeneratedItems.map(item => ({

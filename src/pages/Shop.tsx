@@ -18,6 +18,7 @@ import {
     writeCachedValue,
 } from '../lib/viewCache';
 import { normalizeInventoryStacks } from '../lib/inventoryStack';
+import { getShopOfferExpiresAtMs, isShopOfferExpired } from '../lib/shopCycle';
 
 type StaticItemStyle = {
     icon: React.ReactNode;
@@ -118,8 +119,15 @@ export default function Shop() {
                 .order('updated_at', { ascending: false }),
         ]);
 
-        if (items && items.length > 0) {
-            const nextItems = writePersistedShopOffers(user.id, items as ShopItem[]);
+        const validTimedItems = ((items as ShopItem[] | null) ?? [])
+            .filter((item) => !isShopOfferExpired(item, Date.now()))
+            .map((item) => ({
+                ...item,
+                expires_at: new Date(getShopOfferExpiresAtMs(item)).toISOString(),
+            }));
+
+        if (validTimedItems.length > 0) {
+            const nextItems = writePersistedShopOffers(user.id, validTimedItems);
             setDynamicItems(nextItems);
         } else {
             await handleGenerateShop();
@@ -270,7 +278,7 @@ export default function Shop() {
 
     const personalizedOfferExpiresAt = useMemo(() => {
         if (dynamicItems.length === 0) return null;
-        return Math.min(...dynamicItems.map((item) => new Date(item.expires_at).getTime()));
+        return Math.min(...dynamicItems.map((item) => getShopOfferExpiresAtMs(item)));
     }, [dynamicItems]);
 
     useEffect(() => {

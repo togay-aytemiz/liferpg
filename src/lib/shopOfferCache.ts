@@ -1,4 +1,5 @@
 import type { ShopItem } from './database.types';
+import { getShopOfferExpiresAtMs, isShopOfferExpired } from './shopCycle';
 
 type PersistedShopOffers = {
     items: ShopItem[];
@@ -42,7 +43,11 @@ export function readPersistedShopOffers(userId: string): ShopItem[] | null {
 
         const now = Date.now();
         const activeOffers = parsed.items
-            .filter((item) => !item.is_purchased && new Date(item.expires_at).getTime() > now)
+            .filter((item) => !item.is_purchased && !isShopOfferExpired(item, now))
+            .map((item) => ({
+                ...item,
+                expires_at: new Date(getShopOfferExpiresAtMs(item)).toISOString(),
+            }))
             .sort((a, b) => a.cost - b.cost);
 
         const uniqueOffers = dedupeShopOffers(activeOffers);
@@ -66,7 +71,11 @@ export function readPersistedShopOffers(userId: string): ShopItem[] | null {
 export function writePersistedShopOffers(userId: string, items: ShopItem[]) {
     const activeUniqueOffers = dedupeShopOffers(
         items
-            .filter((item) => !item.is_purchased && new Date(item.expires_at).getTime() > Date.now())
+            .filter((item) => !item.is_purchased && !isShopOfferExpired(item, Date.now()))
+            .map((item) => ({
+                ...item,
+                expires_at: new Date(getShopOfferExpiresAtMs(item)).toISOString(),
+            }))
             .sort((a, b) => a.cost - b.cost)
     );
 

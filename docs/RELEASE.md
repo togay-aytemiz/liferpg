@@ -94,6 +94,7 @@ All notable changes to this project will be documented in this file.
 - Quest stat context above titles no longer renders as a bordered badge; it now uses a lighter eyebrow line so quest cards stay tighter and less visually busy.
 - The `Magical Goods` section header now matches the other Bazaar section headers, and inventory rendering defensively collapses stackable static goods into one owned stack instead of visually fragmenting identical items.
 - Personalized Bazaar offers now show one shared weekly rotation countdown under the section header instead of repeating per-card expiry copy, and expired offers refresh into the next weekly set when the Bazaar is reopened after expiry.
+- Personalized Bazaar offers now use the same `03:00` app-day reset cadence as dailies, but on a 7-app-day weekly loop instead of a raw rolling 7-day timer.
 - Quest cards now allow up to three description lines before truncating, so medium-length task explanations remain readable without expanding the overall card chrome.
 
 ### Fixed

@@ -44,6 +44,7 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **Quest Stat Eyebrow Simplification:** Removed the pill-style quest stat chip and reduced it to a plain eyebrow line so quest cards stay denser.
 - [x] **Bazaar Static Goods Parity:** Aligned the `Magical Goods` section heading with the other Bazaar headers and normalized stackable inventory rendering for owned static goods.
 - [x] **Bazaar Offer Rotation Countdown:** Personalized Bazaar offers now show one shared weekly refresh countdown under the section heading instead of repeating `7d left` on every card, and expired offers regenerate when the Bazaar is opened after rotation.
+- [x] **Bazaar Weekly App-Day Cadence:** Personalized Bazaar offers now rotate on the same `03:00` app-day boundary as daily systems, but only once every 7 app days instead of on a rolling 7x24-hour timer.
 - [x] **Quest Description Visibility:** Quest cards now allow up to three lines of description copy before truncating, so medium-length task context remains readable on mobile.
 - [x] **Loading Copy Simplification:** Removed the redundant static helper sentence under "Generating your quests..." so the rotating RPG status line becomes the single source of loading feedback.
 - [x] **Loading Subtitle Alignment:** Pulled the rotating status line up to sit directly under the loading title, making it read like an RPG-styled subtitle instead of a detached secondary block.
