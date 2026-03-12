@@ -3,7 +3,7 @@
 **Product Name:** LifeRPG
 **Tagline:** Turn your life into a quest.
 
-> **Last Updated:** 2026-03-11
+> **Last Updated:** 2026-03-12
 
 ---
 
@@ -461,3 +461,4 @@ The core user loop:
 - **2026-03-11 - Daily Reroll Quota Ownership:** Daily rerolls are no longer exposed as a raw reserve count. The system still swaps from the existing hidden daily pool, but player-facing allowance is now capped at 2 rerolls per `03:00 -> 03:00` app day and the UI distinguishes quota exhaustion from reserve exhaustion.
 - **2026-03-11 - Shared Protected Runtime Cache:** Protected-app reads now prefer short-lived shared snapshots with in-flight promise deduplication. Frontend edge calls no longer pre-validate every token with network `getUser()` calls, habit state is shared between Dashboard and Habits, streak reads reuse the same cache path, and authenticated daily-settlement checks are throttled per user/app day so idle tab switches or visibility changes do not spam Supabase.
 - **2026-03-11 - Persistent Streak Cache Scope:** The streak chip on the dashboard now uses a narrow localStorage-backed cache layer on top of the shared runtime cache so full browser refreshes do not immediately trigger another `streaks` read. This persistence is intentionally limited to streak data; higher-churn quest and habit payloads remain memory-only to avoid stale gameplay state after reloads.
+- **2026-03-12 - User-Keyed Protected Settlement Gate:** The protected shell's entry settlement gate is now keyed only to the authenticated `user.id`, while the latest `refreshProfile` callback is read indirectly. This prevents Home from re-entering the blank loading shell when auth/profile updates recreate context callbacks for the same signed-in player.

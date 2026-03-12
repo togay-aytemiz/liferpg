@@ -1,6 +1,6 @@
 # Roadmap - lifeRPG
 
-> **Last Updated:** 2026-03-11
+> **Last Updated:** 2026-03-12
 
 This document tracks the structured phases of development for the lifeRPG project, based on the MVP scope outlined in the PRD.
 
@@ -102,6 +102,7 @@ This document tracks the structured phases of development for the lifeRPG projec
 - [x] **AI Weekly Focus Continuity:** Blank/system-chosen focus mode now carries the last AI weekly focus into later weekly generations by default, letting the system continue or sensibly evolve a long-term growth arc instead of resetting randomly every cycle.
 - [x] **Weekly Boss Unlock Gate:** Weekly boss quests now stay locked behind prerequisite daily/side progress, expose remaining unlock conditions in the quest UI, and reject completion server-side until the gate is satisfied.
 - [x] **Authenticated Daily Settlement Fallback:** Daily HP/streak settlement and pool rotation no longer rely only on a background cron; the app now performs an idempotent user-scoped daily settlement on authenticated entry/return after reset.
+- [x] **Home Settlement Flash Loop Fix:** The protected app shell now keys its entry settlement to the authenticated user instead of an unstable context callback identity, preventing Home from dropping back into a blank spinner whenever auth/profile state refreshes.
 - [x] **Reroll Feedback Memory:** Daily rerolls now require a structured reason (with optional custom detail), store that feedback per app day, and feed it back into later LLM generation so the system learns what the player is rejecting.
 - [x] **Persistent Bazaar Inventory:** Bazaar purchases now become inventory items instead of instant one-shot effects; static consumables and personalized offers can be bought, stacked, and used or redeemed later from an inventory section.
 - [x] **Habit Reward Economy:** Good habits now award gold as well as XP, and newly created custom habits derive reward values from frequency, polarity, and the player's current level instead of using flat generic rewards.

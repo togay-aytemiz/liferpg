@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - **Persistent Bazaar Inventory:** Added `inventory_items` plus a new `use-inventory-item` flow so Bazaar purchases are owned persistently, can stack, and are consumed or redeemed later instead of applying immediately on purchase.
 - **AI Weekly Focus Memory:** Added persisted `ai_weekly_focus` profile metadata so blank/surprise focus mode can store the LLM-chosen weekly focus and show it in Settings.
 - **Weekly Boss Unlock Requirements:** Added persisted boss-unlock requirement fields on quests so weekly bosses can be gated behind prerequisite daily/side progress and checked consistently across frontend and backend.
+- **Protected Layout Regression Test:** Added a Vitest coverage case proving the protected app shell does not restart daily settlement when auth context rerenders with the same signed-in user.
 
 ### Changed
 - Replaced Vite boilerplate with RPG-themed application
@@ -156,3 +157,4 @@ All notable changes to this project will be documented in this file.
 - **App-Entry Streak Resets:** Fixed protected screens rendering before the daily settlement/check-in pass completed, which could leave the dashboard showing a stale `0` streak after the `03:00` reset. The app now waits for authenticated daily settlement before loading protected content, and daily check-ins increment streaks on app entry instead of requiring an immediate quest completion.
 - **Legacy App-Entry Streak Carryover:** Fixed users who had already opened the app on the previous app-day before streak check-ins were persisted. The settlement/check-in path now performs a narrow recovery pass when it can still see previous-day player activity, so second-day streaks no longer stay stuck at `1` for that migration edge case.
 - **Misleading 80% Daily Rule Copy:** Fixed the daily-rule helper and overnight threshold math rounding upward to impossible values like `4/4` while still claiming `80%`. The rule now rounds down with a minimum of 1 active objective, so the modal and backend both agree on outcomes like `3/4` and `4/5`.
+- **Home Flashing Spinner Loop:** Fixed the protected Home shell restarting its entry settlement whenever auth/profile state recreated the `refreshProfile` callback. Settlement now stays keyed to `user.id`, so Home no longer flashes back to the blank spinner on stable signed-in sessions.

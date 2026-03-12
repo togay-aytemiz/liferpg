@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './pages/Auth';
@@ -113,12 +113,18 @@ function AppRoutes() {
   );
 }
 
-function ProtectedNavLayout() {
+export function ProtectedNavLayout() {
   const { user, refreshProfile } = useAuth();
+  const userId = user?.id ?? null;
   const [settlementReady, setSettlementReady] = useState(false);
+  const refreshProfileRef = useRef(refreshProfile);
 
   useEffect(() => {
-    if (!user) {
+    refreshProfileRef.current = refreshProfile;
+  }, [refreshProfile]);
+
+  useEffect(() => {
+    if (!userId) {
       setSettlementReady(true);
       return;
     }
@@ -130,7 +136,7 @@ function ProtectedNavLayout() {
       try {
         const result = await settleDailyIfNeeded();
         if (!cancelled && result.settled) {
-          await refreshProfile();
+          await refreshProfileRef.current();
         }
       } catch (error) {
         console.error('Daily settlement failed:', error);
@@ -154,7 +160,7 @@ function ProtectedNavLayout() {
       cancelled = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [refreshProfile, user?.id]);
+  }, [userId]);
 
   if (!settlementReady) {
     return (
